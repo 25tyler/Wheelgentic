@@ -24,7 +24,7 @@ test('audio → Deepgram → Meta structured output → demo robot, through HTTP
   const providers = createProviders(config(), async (url, options) => {
     calls.push({ url: String(url), options });
     if (String(url).includes('deepgram')) return ok({ results: { channels: [{ alternatives: [{ transcript: 'wash my left arm' }] }] } });
-    return ok({ completion_message: { content: { type: 'text', text: JSON.stringify(command()) } } });
+    return ok({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify(command()) } }] });
   });
   const base = await serve(t, config(), { providers });
   const transcription = await fetch(base + '/api/transcribe', { method: 'POST', headers: { 'Content-Type': 'audio/webm;codecs=opus' }, body: Buffer.from('fake audio fixture') });
@@ -39,8 +39,13 @@ test('audio → Deepgram → Meta structured output → demo robot, through HTTP
   assert.match(result.response, /No robot action/);
   assert.equal(calls.length, 2);
   const meta = JSON.parse(calls[1].options.body);
+  assert.equal(calls[1].url, 'https://api.meta.ai/v1/chat/completions');
+  assert.equal(meta.model, 'muse-spark-1.3');
+  assert.equal(meta.reasoning_effort, 'minimal');
+  assert.ok(meta.max_completion_tokens >= 1000);
   assert.equal(meta.messages.at(-1).content, transcript);
   assert.equal(meta.response_format.type, 'json_schema');
+  assert.equal(meta.response_format.json_schema.strict, true);
 });
 
 test('contract supports all three task categories and conversation without arbitrary motion', () => {

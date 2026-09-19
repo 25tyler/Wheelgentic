@@ -5,8 +5,8 @@ export function loadEnvironment() {
 export function getConfig(env = process.env) {
   return {
     deepgramKey: env.DEEPGRAM_API_KEY, metaKey: env.META_API_KEY, tokenKey: env.TOKEN_COMPANY_API_KEY,
-    metaUrl: env.META_API_URL || 'https://api.llama.com/v1/chat/completions',
-    metaModel: env.META_MODEL || 'Llama-4-Maverick-17B-128E-Instruct-FP8',
+    metaUrl: env.META_API_URL || 'https://api.meta.ai/v1/chat/completions',
+    metaModel: env.META_MODEL || 'muse-spark-1.3',
     compressionEnabled: env.TOKEN_COMPANY_ENABLED !== 'false',
     compressionModel: env.TOKEN_COMPANY_MODEL || 'bear-2', compressionThreshold: 3000,
     robotMode: env.ROBOT_MODE || 'demo', robotUrl: env.ROBOT_BACKEND_URL || '', robotKey: env.ROBOT_API_KEY,

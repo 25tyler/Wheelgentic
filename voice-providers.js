@@ -40,9 +40,10 @@ export function createProviders(config, fetchFn = fetch) {
       if (!config.metaKey) throw new AppError('Set META_API_KEY on the server to enable the companion.', 503, 'NOT_CONFIGURED');
       const data = await requestJson(fetchFn, config.metaUrl, {
         method: 'POST', headers: { Authorization: `Bearer ${config.metaKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: config.metaModel, temperature: 0, max_completion_tokens: 350,
+        // Muse Spark uses the completion budget for both reasoning and the JSON answer.
+        body: JSON.stringify({ model: config.metaModel, reasoning_effort: 'minimal', max_completion_tokens: 1200,
           messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...history, { role: 'user', content: transcript }],
-          response_format: { type: 'json_schema', json_schema: { name: 'wheelgentic_command', schema: commandSchema } },
+          response_format: { type: 'json_schema', json_schema: { name: 'wheelgentic_command', strict: true, schema: commandSchema } },
         }),
       }, 'Meta', config.timeoutMs);
       const content = data.completion_message?.content ?? data.choices?.[0]?.message?.content;

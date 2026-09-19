@@ -74,7 +74,7 @@ The local server binds only to 127.0.0.1, rejects foreign origins and unexpected
 
 The Token Company compresses only older history over 3,000 characters. The system instructions, current transcript, and last four turns stay intact. No key, short history, or `TOKEN_COMPANY_ENABLED=false` skips compression. Compression failures use original bounded context. Meta/Deepgram failures surface in the UI and do not fabricate success. Transcripts are limited to 1,000 characters; history to 20 messages of 1,000 characters each. API timeouts are 15 seconds (compression 5 seconds).
 
-Meta uses `META_API_URL` (default `https://api.llama.com/v1/chat/completions`) and configurable `META_MODEL`. It supports Meta's `completion_message.content` text object as well as an OpenAI-compatible choices envelope.
+Meta uses the current Model API at `META_API_URL` (default `https://api.meta.ai/v1/chat/completions`) with `META_MODEL=muse-spark-1.3`. The older `api.llama.com` endpoint rejected this machine's Model API key with HTTP 401. The request uses strict JSON output, minimal reasoning, and a 1,200-token completion budget covering both reasoning and the JSON answer. The response is read from `choices[0].message.content`; the legacy `completion_message.content` shape is also understood. Credentials remain in `META_API_KEY` on the server.
 
 ## Modules
 
@@ -92,7 +92,7 @@ Meta uses `META_API_URL` (default `https://api.llama.com/v1/chat/completions`) a
 - Automated integration tests pass using provider fixtures; these verify plumbing and failure behavior, not live Meta classification quality.
 - Live Deepgram transcribed its public sample audio successfully.
 - Live The Token Company compressed synthetic history successfully.
-- Live Meta rejected the supplied key with HTTP 401. Update `META_API_KEY` in `.env` and restart to enable real classification. No substitute AI or guessed successful classification is used.
+- Live Meta Model API accepted the locally configured key: "Take a bath." returned `showering/start/body` in the frontend; water and medication requests classified correctly through `/api/command`; vitals and a negated washing request stayed conversation with no task dispatched. The earlier 401 came from using the older Llama endpoint. Robot delivery remains simulated until the backend is connected.
 
-Provider references: [Deepgram prerecorded audio](https://developers.deepgram.com/docs/pre-recorded-audio), [Meta official SDK and API schema](https://github.com/meta-llama/llama-api-typescript), [The Token Company SDK](https://github.com/TheTokenCompany/the-token-company-node).
+Provider references: [Deepgram prerecorded audio](https://developers.deepgram.com/docs/pre-recorded-audio), [Meta Model API chat completions](https://dev.meta.ai/docs/protocols/chat-completions), [Meta structured output](https://dev.meta.ai/docs/structured-output), [The Token Company SDK](https://github.com/TheTokenCompany/the-token-company-node).
 
