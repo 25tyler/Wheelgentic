@@ -7,6 +7,8 @@ function harness(t, getUserMedia, Recorder) {
   const node = selector => {
     if (!elements.has(selector)) elements.set(selector, {
       textContent: '', value: '', disabled: false,
+      classList: { add() {}, remove() {}, toggle() {} },
+      setAttribute(name, value) { this[name] = value; },
       addEventListener() {}, removeEventListener() {},
     });
     return elements.get(selector);
@@ -21,7 +23,7 @@ function harness(t, getUserMedia, Recorder) {
     requests.push({ url, options });
     const data = url.endsWith('/status') ? { deepgram: true, meta: true, robotMode: 'demo' }
       : url.endsWith('/transcribe') ? { transcript: 'wash my left arm' }
-      : { command: { category: 'showering', action: 'start', target: 'left_arm', item: 'none', response: 'Understood' }, response: 'Demo request prepared.', delivery: { status: 'simulated' } };
+      : { command: { category: 'showering', action: 'start', target: 'left_arm', item: 'none', response: 'Understood' }, response: 'Your showering request is ready.', delivery: { status: 'simulated' } };
     return new Response(JSON.stringify(data));
   } });
   t.after(() => {
@@ -67,13 +69,17 @@ test('recording uploads real recorder MIME type, displays transcript and routes 
   const { node, requests } = harness(t, async () => ({ getTracks: () => [{ stop: () => stopped++ }] }), FakeRecorder);
   await node('#record-voice').onclick();
   assert.match(node('#voice-status').textContent, /Listening/);
+  assert.equal(node('#record-label').textContent, 'Stop microphone');
+  assert.equal(node('#record-voice')['aria-pressed'], 'true');
   await node('#record-voice').onclick();
   await new Promise(resolve => setImmediate(resolve));
   const audioRequest = requests.find(r => r.url === '/api/transcribe');
   assert.equal(audioRequest.options.body.type, 'audio/webm;codecs=opus');
   assert.equal(JSON.parse(requests.find(r => r.url === '/api/command').options.body).transcript, 'wash my left arm');
   assert.equal(node('#voice-transcript').textContent, 'wash my left arm');
-  assert.match(node('#voice-route').textContent, /Showering/);
+  assert.equal(node('#voice-response').textContent, 'Your showering request is ready.');
+  assert.equal(node('#record-label').textContent, 'Start microphone');
+  assert.equal(node('#record-voice')['aria-pressed'], 'false');
   assert.equal(node('#record-voice').disabled, false);
   assert.equal(stopped, 1);
 });

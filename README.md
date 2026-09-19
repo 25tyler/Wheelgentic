@@ -8,14 +8,14 @@ Requires Node.js 22 or later.
 
 1. Copy `.env.example` to `.env` and set `DEEPGRAM_API_KEY`, `META_API_KEY`, and optionally `TOKEN_COMPANY_API_KEY`.
 2. Run `npm run dev` and open http://127.0.0.1:5173.
-3. Open **Talk to me**, click **Start microphone**, allow microphone access, speak, then click **Finish recording**. Recording automatically finishes after 20 seconds. The typed input uses the same intent pipeline.
+3. Open **Talk to me**, click **Start microphone**, allow microphone access, speak, then click **Stop microphone**. Recording automatically finishes after 20 seconds. The typed input uses the same intent pipeline.
 4. Run `npm test` for mocked integration and error-path tests; `npm run check` for syntax checks.
 
 `.env` is ignored by Git and never served over HTTP. Restart the server after changing it. The current machine has local credentials configured; they are not included in this repository. Other teammates must supply their own environment.
 
 ## Flow
 
-Browser MediaRecorder → POST /api/transcribe → Deepgram Nova-3 → transcript shown in frontend → POST /api/command → optional older-history compression → Meta structured JSON → server validation → robot adapter → assistant response and selected category shown in frontend.
+Browser MediaRecorder → POST /api/transcribe → Deepgram Nova-3 → transcript shown in frontend → POST /api/command → optional older-history compression → Meta structured JSON → server validation → robot adapter → transcript and assistant response shown in frontend.
 
 This is turn-based recording, not an always-listening stream. Compressed audio is uploaded with its real MIME type; no ffmpeg, PCM conversion, or exposed browser API key is needed. Audio is held in memory for the request and not written by the server. Voice conversation history lives in browser memory for this page session. Daily care logs remain separate in localStorage. A voice request never falsely marks a meal, shower, or medication as completed.
 
@@ -38,7 +38,7 @@ This is turn-based recording, not an always-listening stream. Compressed audio i
 
 Only valid category/action/target/item combinations are accepted. Extra fields, arbitrary functions, medication dosages, and motor coordinates are rejected. Water maps to eating. Vitals and other unsupported requests map to talk_to_me, not a robot task. Past activity, negated requests, ambiguity, or multiple tasks prompt conversation/clarification. Medication repeat commands are not supported.
 
-Simple stop/pause phrases and dedicated buttons bypass Meta and compression, even if those providers are down. A stop invalidates earlier interpretations still awaiting dispatch. A command already delivered to the robot cannot be recalled by this app: the backend must enforce stop ordering and physical safety. This voice stop is not a hardware emergency stop.
+Simple stop/pause phrases bypass Meta and compression, even if those providers are down. The voice dialog has one microphone toggle: Start microphone begins recording, Stop microphone finishes and submits it. It has no separate robot pause/stop buttons. A stop invalidates earlier interpretations still awaiting dispatch. A command already delivered to the robot cannot be recalled by this app: the backend must enforce stop ordering and physical safety. This voice stop is not a hardware emergency stop.
 
 ## API / teammate integration
 
@@ -78,7 +78,7 @@ Meta uses the current Model API at `META_API_URL` (default `https://api.meta.ai/
 
 ## Modules
 
-- `voice-client.js`: microphone lifecycle, transcript display, typed fallback, pause/stop, session history
+- `voice-client.js`: microphone toggle, transcript/reply display, typed fallback, session history
 - `voice-providers.js`: Deepgram, Meta and Token Company HTTP clients
 - `voice-commands.js`: schema, validation, routing prompt, direct controls
 - `voice-service.js`: pipeline coordination and pending-command cancellation
@@ -96,3 +96,7 @@ Meta uses the current Model API at `META_API_URL` (default `https://api.meta.ai/
 
 Provider references: [Deepgram prerecorded audio](https://developers.deepgram.com/docs/pre-recorded-audio), [Meta Model API chat completions](https://dev.meta.ai/docs/protocols/chat-completions), [Meta structured output](https://dev.meta.ai/docs/structured-output), [The Token Company SDK](https://github.com/TheTokenCompany/the-token-company-node).
 
+
+## Care interface
+
+The voice dialog keeps provider configuration, structured JSON, compression details, and delivery mode out of the user interface. The API still returns those fields for integration. Prepared task replies say the request is ready, without claiming movement or completion. Vitals show an empty state until readings are available. Shower check-ins record an already completed shower, like the meal tracker; older synthetic bathing records are excluded from the displayed journal, counts, and report. Original stored records are preserved.

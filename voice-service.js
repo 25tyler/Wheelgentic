@@ -8,11 +8,11 @@ export function createVoiceService(providers, robot) {
     return robot.dispatch(command);
   }
   function responseFor(command, delivery) {
-    if (delivery.status === 'cancelled') return 'That pending request was cancelled by pause or stop.';
+    if (delivery.status === 'cancelled') return 'Your request was cancelled.';
     if (command.action === 'none') return command.response;
     const label = ['stop', 'pause'].includes(command.action) ? command.action : command.category.replaceAll('_', ' ');
-    return delivery.mode === 'demo' ? `Demo: ${label} request prepared. No robot action was performed.`
-      : `The backend accepted your ${label} request. Completion has not been confirmed.`;
+    return delivery.mode === 'demo' ? `Your ${label} request is ready.`
+      : `Your ${label} request has been sent.`;
   }
   return {
     async process(body) {
@@ -22,7 +22,7 @@ export function createVoiceService(providers, robot) {
         const delivery = await dispatch(control);
         return { transcript, command: control, response: responseFor(control, delivery), delivery, compression: 'skipped' };
       }
-      if (busy) throw new AppError('A voice request is already processing. Pause and stop remain available.', 409, 'BUSY');
+      if (busy) throw new AppError('Please wait for your current request to finish.', 409, 'BUSY');
       busy = true;
       const startedAt = generation;
       try {

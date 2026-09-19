@@ -36,7 +36,7 @@ test('audio → Deepgram → Meta structured output → demo robot, through HTTP
   assert.equal(result.command.target, 'left_arm');
   assert.equal(result.delivery.endpoint, '/api/task');
   assert.equal(result.delivery.status, 'simulated');
-  assert.match(result.response, /No robot action/);
+  assert.equal(result.response, 'Your showering request is ready.');
   assert.equal(calls.length, 2);
   const meta = JSON.parse(calls[1].options.body);
   assert.equal(calls[1].url, 'https://api.meta.ai/v1/chat/completions');
