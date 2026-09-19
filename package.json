@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "node server.js",
     "start": "node server.js",
-    "check": "node --check app.js && node --check voice-client.js && node --check server.js",
-    "test": "node --test voice.test.js voice-client.test.js"
+    "check": "node --check app.js && node --check voice-client.js && node --check voice-speech.js && node --check server.js",
+    "test": "node --test voice.test.js voice-client.test.js voice-speech.test.js"
   }
 }

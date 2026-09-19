@@ -5,10 +5,12 @@ import { getConfig } from './voice-config.js';
 import { createProviders } from './voice-providers.js';
 import { createRobotAdapter } from './robot-adapter.js';
 import { createVoiceService } from './voice-service.js';
-import { directControl, validateCommand, validateInput } from './voice-commands.js';
+import { directControl, validateCommand, validateInput, validateInterpretation } from './voice-commands.js';
 
 const config = () => ({ ...getConfig({}), deepgramKey: 'test-dg', metaKey: 'test-meta', tokenKey: 'test-ttc' });
 const command = (category = 'showering', action = 'start', target = 'left_arm', item = 'none') => ({ category, action, target, item, response: 'Request understood.' });
+const modelReply = (c, suggestion='none') => ({...c,understanding:'You would like some help.',suggestion});
+const interpretation = (c, suggestion='none') => validateInterpretation(modelReply(c,suggestion));
 const talk = () => command('talk_to_me', 'none', 'none', 'none');
 const ok = data => new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
 const post = body => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -24,7 +26,7 @@ test('audio → Deepgram → Meta structured output → demo robot, through HTTP
   const providers = createProviders(config(), async (url, options) => {
     calls.push({ url: String(url), options });
     if (String(url).includes('deepgram')) return ok({ results: { channels: [{ alternatives: [{ transcript: 'wash my left arm' }] }] } });
-    return ok({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify(command()) } }] });
+    return ok({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify(modelReply(command())) } }] });
   });
   const base = await serve(t, config(), { providers });
   const transcription = await fetch(base + '/api/transcribe', { method: 'POST', headers: { 'Content-Type': 'audio/webm;codecs=opus' }, body: Buffer.from('fake audio fixture') });
@@ -36,7 +38,7 @@ test('audio → Deepgram → Meta structured output → demo robot, through HTTP
   assert.equal(result.command.target, 'left_arm');
   assert.equal(result.delivery.endpoint, '/api/task');
   assert.equal(result.delivery.status, 'simulated');
-  assert.equal(result.response, 'Your showering request is ready.');
+  assert.equal(result.response, 'Okay, your request for help washing your left arm is ready.');
   assert.equal(calls.length, 2);
   const meta = JSON.parse(calls[1].options.body);
   assert.equal(calls[1].url, 'https://api.meta.ai/v1/chat/completions');
@@ -66,7 +68,7 @@ test('unknown, malformed and injected Meta commands never dispatch', async () =>
 test('conversation and unsupported capabilities never invoke robot HTTP', async () => {
   let calls = 0;
   const robot = createRobotAdapter({ ...config(), robotMode: 'live', robotUrl: 'http://robot.test' }, async () => { calls++; return ok({}); });
-  const service = createVoiceService({ compress: async h => ({ history: h }), interpret: async () => ({ ...talk(), response: 'Live vitals are not connected yet.' }) }, robot);
+  const service = createVoiceService({ compress: async h => ({ history: h }), interpret: async () => interpretation({ ...talk(), response: 'Live vitals are not connected yet.' }) }, robot);
   const result = await service.process({ transcript: 'check my vitals' });
   assert.equal(result.command.category, 'talk_to_me');
   assert.equal(result.delivery.status, 'not_sent');
@@ -95,7 +97,7 @@ test('stop invalidates an older in-flight interpretation and duplicate requests 
   await waiting;
   await assert.rejects(service.process({ transcript: 'bring water' }), error => error.status === 409);
   await service.control('stop');
-  release(command());
+  release(interpretation(command()));
   const result = await pending;
   assert.equal(result.delivery.status, 'cancelled');
   assert.deepEqual(sent, ['stop']);
@@ -175,4 +177,47 @@ test('input trims text, bounds history, and rejects forged system roles', () => 
   const input = validateInput({ transcript: 'hello', history: Array.from({ length: 30 }, () => ({ role: 'user', content: 'a'.repeat(2000) })) });
   assert.equal(input.history.length, 20);
   assert.equal(input.history[0].content.length, 1000);
+});
+
+test('suggestions stay conversational and never dispatch a robot task', async () => {
+  let calls = 0;
+  const service = createVoiceService({
+    compress: async history => ({ history, status:'skipped' }),
+    interpret: async () => interpretation({...talk(),response:'Would you like help eating?'},'eating'),
+  }, {dispatch:async()=>{calls++;}});
+  const result = await service.process({transcript:"I'm hungry"});
+  assert.equal(result.suggestion,'eating');
+  assert.equal(result.understanding,'You would like some help.');
+  assert.equal(result.response,'Would you like help eating?');
+  assert.equal(result.delivery.status,'not_sent');
+  assert.equal(calls,0);
+  assert.throws(()=>validateInterpretation(modelReply(command(),'eating')));
+  assert.throws(()=>validateInterpretation(modelReply(talk(),'drive')));
+  assert.throws(()=>validateInterpretation({...modelReply(talk()),understanding:'x'.repeat(181)}));
+});
+
+test('speech endpoint returns MP3, bounds input, and keeps credentials server-side', async t => {
+  const calls=[];
+  const providers=createProviders(config(),async(url,options)=>{
+    calls.push({url:String(url),options});
+    return new Response(Buffer.from('test audio'),{headers:{'Content-Type':'audio/mpeg'}});
+  });
+  const base=await serve(t,config(),{providers});
+  const response=await fetch(base+'/api/speak',post({text:'Would you like help eating?'}));
+  assert.equal(response.status,200);
+  assert.equal(response.headers.get('Content-Type'),'audio/mpeg');
+  assert.equal(response.headers.get('Cache-Control'),'no-store');
+  assert.equal(await response.text(),'test audio');
+  assert.match(calls[0].url,/api\.deepgram\.com\/v1\/speak\?/);
+  assert.equal(JSON.parse(calls[0].options.body).text,'Would you like help eating?');
+  for(const text of ['',null,'x'.repeat(1001)])assert.equal((await fetch(base+'/api/speak',post({text}))).status,400);
+  assert.equal(calls.length,1);
+  assert.equal((await fetch(base+'/api/speak',{...post({text:'Hi'}),headers:{'Content-Type':'application/json',Origin:'https://evil.test'}})).status,403);
+});
+
+test('speech provider errors do not expose credentials or return invalid audio', async()=>{
+  for(const response of [new Response('private provider details',{status:401}),ok({error:'not audio'}),new Response('',{headers:{'Content-Type':'audio/mpeg'}})]){
+    const provider=createProviders(config(),async()=>response);
+    await assert.rejects(provider.synthesize('Hello'),error=>error.code==='PROVIDER_ERROR'&&!/private/.test(error.message));
+  }
 });

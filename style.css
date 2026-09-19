@@ -38,3 +38,40 @@
 @keyframes mic-pulse{50%{box-shadow:0 0 0 16px #dceefb,0 0 0 30px #edf6fc}}
 @media(prefers-reduced-motion:reduce){.microphone-button.is-recording .microphone-symbol{animation:none}}
 @media(max-width:540px){.voice-dialog{padding:17px 20px 22px}.voice-heading h2{font-size:23px}.microphone-symbol{width:112px;height:112px}.voice-message{padding:13px 15px}}
+
+/* Always-visible conversation workspace */
+.companion-panel{border:1px solid #cee1ee;border-radius:18px;background:#fff;overflow:hidden;box-shadow:0 8px 28px #406f9406}
+.companion-toolbar{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:21px 26px;border-bottom:1px solid #e5eef5}
+.companion-toolbar h3{font:700 22px/1.4 Manrope,sans-serif;letter-spacing:-.6px;margin:0}
+.sound-toggle{display:flex;align-items:center;gap:9px;border:1px solid #dce9f2;border-radius:20px;background:#f3f9fd;padding:9px 12px;color:#4a799a;font-size:11px;white-space:nowrap}
+.sound-toggle:before{content:'';width:7px;height:7px;border-radius:50%;background:#6099bc}
+.sound-toggle[aria-pressed=false]:before{background:#aab7c1}
+.companion-layout{display:grid;grid-template-columns:minmax(205px,.7fr) minmax(0,1.55fr)}
+.voice-station{background:linear-gradient(160deg,#e8f4fc,#f5faff);border-right:1px solid #e0edf6;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:34px 18px;min-width:0}
+.voice-station .microphone-button{min-width:0;width:100%;padding:12px 8px;gap:20px}
+.voice-station .microphone-symbol{width:118px;height:118px;box-shadow:0 0 0 12px #dbedf9,0 0 0 25px #e8f4fc}
+.voice-station .microphone-button.is-recording .microphone-symbol{animation:mic-pulse 1.7s ease-in-out infinite}
+.voice-station #voice-status{min-height:36px;text-align:center;font-size:12px;color:#6b8ca5;line-height:1.6;max-width:220px;margin:5px 0 0}
+.conversation-flow{padding:24px;display:flex;flex-direction:column;gap:15px;min-width:0}
+.conversation-flow p{font-size:14px;line-height:1.75;margin:5px 0 0;overflow-wrap:anywhere}
+.transcript-card{padding:4px 5px 13px;border-bottom:1px solid #eaf0f5;color:#637e92}
+.voice-speaker{font-size:10px;letter-spacing:1px;text-transform:uppercase;margin:0;color:#6f8ca1}
+.understanding-card{display:flex;align-items:flex-start;gap:11px;padding:12px 15px;border-radius:10px;background:#f3f8fc;color:#537992}
+.understanding-card p{font-size:12px;line-height:1.65}
+.understanding-mark{font-size:20px;color:#7ca6c3;line-height:1.2;margin-top:2px}
+.reply-card{padding:17px 18px;border:1px solid #dbeaf5;border-radius:13px;background:#eaf4fc;color:#2b516d}
+.reply-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:24px}
+.reply-listen{border:0;background:none;color:#5983a1;font-size:10px;padding:3px 0;white-space:nowrap}
+.reply-listen:disabled{opacity:.4;cursor:default}
+#speech-status{font-size:10px;color:#648aa5;line-height:1.6;display:block;margin-top:5px}
+#speech-status:empty{display:none}
+#voice-suggestions{border-top:1px solid #d2e4f2;padding-top:12px;margin-top:15px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:9px}
+#voice-suggestions[hidden]{display:none}
+#suggestion-label{font-size:10px;color:#6889a0}
+.suggestion-button{border:1px solid #98bfdb;background:#fff;border-radius:8px;padding:9px 12px;font-size:11px;font-weight:600;color:#376d95}
+.suggestion-button:disabled{opacity:.5;cursor:wait}
+.conversation-flow .voice-input-row{margin-top:auto;border-radius:10px}
+.conversation-flow .voice-input-row input{font-size:12px}
+@media(max-width:1050px){.companion-toolbar{padding:18px 20px}.companion-toolbar h3{font-size:20px}.companion-layout{grid-template-columns:minmax(180px,.7fr) minmax(0,1.3fr)}.conversation-flow{padding:19px}.voice-station{padding:28px 10px}.voice-station .microphone-symbol{width:100px;height:100px}.voice-station .microphone-button{font-size:14px}}
+@media(max-width:680px){.companion-toolbar{align-items:flex-start;gap:10px;padding:17px}.companion-toolbar h3{font-size:18px}.sound-toggle{font-size:9px;padding:8px}.companion-layout{grid-template-columns:1fr}.voice-station{border-right:0;border-bottom:1px solid #e0edf6;padding:15px}.voice-station .microphone-button{max-width:260px;gap:9px}.voice-station .microphone-symbol{width:83px;height:83px;margin:10px 0 9px;box-shadow:0 0 0 8px #dbedf9,0 0 0 16px #e8f4fc}.voice-station .microphone-symbol svg{width:31px;height:36px}.voice-station #voice-status{min-height:19px;font-size:11px;margin:0}.conversation-flow{padding:17px;gap:12px}.conversation-flow p{font-size:13px}.understanding-card p{font-size:12px}}
+@media(prefers-reduced-motion:reduce){.voice-station .microphone-button.is-recording .microphone-symbol{animation:none}}

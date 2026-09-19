@@ -5,6 +5,7 @@ export function loadEnvironment() {
 export function getConfig(env = process.env) {
   return {
     deepgramKey: env.DEEPGRAM_API_KEY, metaKey: env.META_API_KEY, tokenKey: env.TOKEN_COMPANY_API_KEY,
+    speechModel: env.DEEPGRAM_TTS_MODEL || 'aura-2-thalia-en',
     metaUrl: env.META_API_URL || 'https://api.meta.ai/v1/chat/completions',
     metaModel: env.META_MODEL || 'muse-spark-1.3',
     compressionEnabled: env.TOKEN_COMPANY_ENABLED !== 'false',

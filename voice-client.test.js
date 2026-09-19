@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { openVoice, disposeVoice } from './voice-client.js';
+import { mountVoice, disposeVoice } from './voice-client.js';
 
 function harness(t, getUserMedia, Recorder) {
   const elements = new Map();
@@ -13,17 +13,26 @@ function harness(t, getUserMedia, Recorder) {
     });
     return elements.get(selector);
   };
-  const names = ['document', 'navigator', 'MediaRecorder', 'fetch'];
+  const names = ['document', 'navigator', 'MediaRecorder', 'fetch', 'Audio', 'localStorage'];
   const original = names.map(name => [name, Object.getOwnPropertyDescriptor(globalThis, name)]);
-  const requests = [];
+  const requests = [], audio = [];
+  const settings = new Map();
+  Object.defineProperty(globalThis, 'localStorage', {configurable:true,value:{getItem:key=>settings.get(key),setItem:(key,value)=>settings.set(key,value)}});
+  Object.defineProperty(globalThis, 'Audio', {configurable:true,value:class {
+    constructor(){this.paused=true;audio.push(this);}
+    play(){this.paused=false;return Promise.resolve();}
+    pause(){this.paused=true;}
+    removeAttribute(){} load(){}
+  }});
   Object.defineProperty(globalThis, 'document', { configurable: true, value: { querySelector: node, querySelectorAll: () => [] } });
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { mediaDevices: { getUserMedia } } });
   Object.defineProperty(globalThis, 'MediaRecorder', { configurable: true, value: Recorder });
   Object.defineProperty(globalThis, 'fetch', { configurable: true, value: async (url, options) => {
     requests.push({ url, options });
+    if(url==='/api/speak')return new Response(new Uint8Array([1,2,3]),{headers:{'Content-Type':'audio/mpeg'}});
     const data = url.endsWith('/status') ? { deepgram: true, meta: true, robotMode: 'demo' }
       : url.endsWith('/transcribe') ? { transcript: 'wash my left arm' }
-      : { command: { category: 'showering', action: 'start', target: 'left_arm', item: 'none', response: 'Understood' }, response: 'Your showering request is ready.', delivery: { status: 'simulated' } };
+      : { command: { category: 'showering', action: 'start', target: 'left_arm', item: 'none', response: 'Understood' }, response: 'Your showering request is ready.', understanding: 'You want your left arm washed.', suggestion:'none', delivery: { status: 'simulated' } };
     return new Response(JSON.stringify(data));
   } });
   t.after(() => {
@@ -32,8 +41,8 @@ function harness(t, getUserMedia, Recorder) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor); else delete globalThis[name];
     }
   });
-  openVoice(() => {});
-  return { node, requests };
+  const controller=mountVoice({querySelector:node,innerHTML:''});
+  return { node, requests, audio, controller };
 }
 
 class FakeRecorder {
@@ -53,7 +62,7 @@ test('microphone denial shows an error and re-enables the button', async t => {
   assert.equal(node('#record-voice').disabled, false);
 });
 
-test('closing while microphone permission is pending releases subsequently acquired tracks', async t => {
+test('leaving the voice section while microphone permission is pending releases subsequently acquired tracks', async t => {
   let resolve, stopped = 0;
   const { node, requests } = harness(t, () => new Promise(r => { resolve = r; }), FakeRecorder);
   const pending = node('#record-voice').onclick();
@@ -84,7 +93,7 @@ test('recording uploads real recorder MIME type, displays transcript and routes 
   assert.equal(stopped, 1);
 });
 
-test('closing an active recorder discards audio and releases the microphone', async t => {
+test('leaving the voice section discards recording and releases the microphone', async t => {
   let stopped = 0;
   const { node, requests } = harness(t, async () => ({ getTracks: () => [{ stop: () => stopped++ }] }), FakeRecorder);
   await node('#record-voice').onclick();
@@ -92,4 +101,24 @@ test('closing an active recorder discards audio and releases the microphone', as
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(stopped, 1);
   assert.ok(!requests.some(r => r.url === '/api/transcribe'));
+});
+
+test('reply speech stops before recording, mute suppresses automatic speech, and navigation releases audio', async t => {
+  const {node,requests,audio,controller}=harness(t,async()=>({getTracks:()=>[{stop(){}}]}),FakeRecorder);
+  const send=async text=>{node('#voice-text').value=text;node('#voice-form').onsubmit({preventDefault(){}});await new Promise(resolve=>setImmediate(resolve));};
+  await send('Wash my left arm');
+  assert.equal(node('#voice-understanding').textContent,'You want your left arm washed.');
+  assert.equal(audio[0].paused,false);
+  await node('#record-voice').onclick();
+  assert.equal(audio[0].paused,true);
+  controller.suspend();
+  node('#voice-sound').onclick();
+  const spoken=requests.filter(r=>r.url==='/api/speak').length;
+  await send('hello');
+  assert.equal(requests.filter(r=>r.url==='/api/speak').length,spoken);
+  node('#voice-replay').onclick();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(audio.at(-1).paused,false);
+  controller.suspend();
+  assert.equal(audio.at(-1).paused,true);
 });

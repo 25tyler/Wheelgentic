@@ -11,6 +11,7 @@ const assets = new Map([
   ['/', ['index.html', 'text/html']], ['/index.html', ['index.html', 'text/html']],
   ['/style.css', ['style.css', 'text/css']], ['/app.js', ['app.js', 'text/javascript']],
   ['/voice-client.js', ['voice-client.js', 'text/javascript']],
+  ['/voice-speech.js', ['voice-speech.js', 'text/javascript']],
 ]);
 const audioTypes = new Set(['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/wav', 'audio/x-wav']);
 async function readBody(req, maxBytes) {
@@ -53,6 +54,12 @@ export function createApp(config = getConfig(), dependencies = {}) {
         return json(res, 200, { transcript: await providers.transcribe(audio, contentType) });
       }
       if (req.method === 'POST' && url.pathname === '/api/command') return json(res, 200, await voice.process(await jsonBody(req)));
+      if (req.method === 'POST' && url.pathname === '/api/speak') {
+        const body = await jsonBody(req);
+        const audio = await providers.synthesize(body?.text);
+        res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+        return res.end(audio);
+      }
       if (req.method === 'POST' && url.pathname === '/api/stop') {
         const body = await jsonBody(req);
         return json(res, 200, await voice.control(body?.action || 'stop'));
