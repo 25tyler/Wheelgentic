@@ -75,3 +75,6 @@
 @media(max-width:1050px){.companion-toolbar{padding:18px 20px}.companion-toolbar h3{font-size:20px}.companion-layout{grid-template-columns:minmax(180px,.7fr) minmax(0,1.3fr)}.conversation-flow{padding:19px}.voice-station{padding:28px 10px}.voice-station .microphone-symbol{width:100px;height:100px}.voice-station .microphone-button{font-size:14px}}
 @media(max-width:680px){.companion-toolbar{align-items:flex-start;gap:10px;padding:17px}.companion-toolbar h3{font-size:18px}.sound-toggle{font-size:9px;padding:8px}.companion-layout{grid-template-columns:1fr}.voice-station{border-right:0;border-bottom:1px solid #e0edf6;padding:15px}.voice-station .microphone-button{max-width:260px;gap:9px}.voice-station .microphone-symbol{width:83px;height:83px;margin:10px 0 9px;box-shadow:0 0 0 8px #dbedf9,0 0 0 16px #e8f4fc}.voice-station .microphone-symbol svg{width:31px;height:36px}.voice-station #voice-status{min-height:19px;font-size:11px;margin:0}.conversation-flow{padding:17px;gap:12px}.conversation-flow p{font-size:13px}.understanding-card p{font-size:12px}}
 @media(prefers-reduced-motion:reduce){.voice-station .microphone-button.is-recording .microphone-symbol{animation:none}}
+
+/* Keep the brand lowercase even in uppercase labels. */
+.brand-name{text-transform:none}

@@ -1,4 +1,4 @@
-# Wheelgentic voice + care dashboard
+# carechair voice + care dashboard
 
 A light-blue care dashboard with a small Node.js voice pipeline. Plain browser JavaScript, Node built-ins, no npm dependencies, no robot movement implementation.
 
@@ -8,7 +8,7 @@ Requires Node.js 22 or later.
 
 1. Copy `.env.example` to `.env` and set `DEEPGRAM_API_KEY`, `META_API_KEY`, and optionally `TOKEN_COMPANY_API_KEY`.
 2. Run `npm run dev` and open http://127.0.0.1:5173.
-3. Use the inline **Talk to Wheelgentic** panel on Overview. Click **Start microphone**, speak, then **Stop microphone**. Recording automatically finishes after 20 seconds. You can also type a message.
+3. Use the inline **Talk to carechair** panel on Overview. Click **Start microphone**, speak, then **Stop microphone**. Recording automatically finishes after 20 seconds. You can also type a message.
 4. Replies play aloud automatically through Deepgram Aura-2. Use **Voice replies on/off** to mute automatic playback or **Listen again** to replay. If the browser blocks autoplay, click **Listen again**. Starting a new recording or leaving Overview stops speech.
 5. Run `npm test` for mocked integration and error-path tests; `npm run check` for syntax checks.
 

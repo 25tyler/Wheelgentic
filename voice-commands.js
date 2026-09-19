@@ -19,7 +19,7 @@ export const interpretationSchema = {
     suggestion: { type: 'string', enum: ['none', 'eating', 'showering', 'take_meds'] },
   },
 };
-export const SYSTEM_PROMPT = `You are Wheelgentic's assistive wheelchair voice companion.
+export const SYSTEM_PROMPT = `You are carechair's assistive wheelchair voice companion. Always write the brand as carechair, all lowercase with no space.
 Return only JSON matching the schema. There are EXACTLY THREE task functions:
 eating (food and drinking water), showering (washing), take_meds (medication assistance request).
 Everything else belongs to talk_to_me with action none. Be a warm, attentive conversation partner.

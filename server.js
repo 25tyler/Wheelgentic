@@ -86,5 +86,5 @@ export function createApp(config = getConfig(), dependencies = {}) {
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   loadEnvironment(); const config = getConfig();
-  createApp(config).listen(config.port, '127.0.0.1', () => console.log(`Wheelgentic: http://127.0.0.1:${config.port} (robot: ${config.robotMode})`));
+  createApp(config).listen(config.port, '127.0.0.1', () => console.log(`carechair: http://127.0.0.1:${config.port} (robot: ${config.robotMode})`));
 }

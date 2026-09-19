@@ -6,7 +6,7 @@ export function disposeVoice() { dispose(); dispose = () => {}; }
 export function mountVoice(root) {
   disposeVoice();
   root.innerHTML = `<div class="companion-panel">
-    <div class="companion-toolbar"><h3>Talk to Wheelgentic</h3><button id="voice-sound" class="sound-toggle" aria-pressed="true">Voice replies on</button></div>
+    <div class="companion-toolbar"><h3>Talk to carechair</h3><button id="voice-sound" class="sound-toggle" aria-pressed="true">Voice replies on</button></div>
     <div class="companion-layout">
       <div class="voice-station"><button id="record-voice" class="microphone-button" aria-pressed="false">
         <span class="microphone-symbol" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></svg><span class="microphone-stop"></span></span>
@@ -15,10 +15,10 @@ export function mountVoice(root) {
       <div class="conversation-flow">
         <div class="transcript-card"><span class="voice-speaker">You said</span><p id="voice-transcript">Your words will appear here.</p></div>
         <div class="understanding-card"><span class="understanding-mark" aria-hidden="true">✦</span><div><span class="voice-speaker">I understood</span><p id="voice-understanding">I'll help you find the next step.</p></div></div>
-        <div class="reply-card"><div class="reply-heading"><span class="voice-speaker">Wheelgentic</span><button id="voice-replay" class="reply-listen" disabled>Listen again</button></div><p id="voice-response" aria-live="polite">I'm here. What would you like a hand with?</p><span id="speech-status" role="status"></span>
+        <div class="reply-card"><div class="reply-heading"><span class="voice-speaker brand-name">carechair</span><button id="voice-replay" class="reply-listen" disabled>Listen again</button></div><p id="voice-response" aria-live="polite">I'm here. What would you like a hand with?</p><span id="speech-status" role="status"></span>
           <div id="voice-suggestions" hidden><span id="suggestion-label"></span><button id="voice-suggestion" class="suggestion-button">Yes, help me with that ↗</button></div>
         </div>
-        <form id="voice-form" class="voice-input-row"><input id="voice-text" aria-label="Message Wheelgentic" placeholder="Or type a message…" maxlength="1000" required autocomplete="off"><button id="voice-send" class="voice-send-button" aria-label="Send message">↑</button></form>
+        <form id="voice-form" class="voice-input-row"><input id="voice-text" aria-label="Message carechair" placeholder="Or type a message…" maxlength="1000" required autocomplete="off"><button id="voice-send" class="voice-send-button" aria-label="Send message">↑</button></form>
       </div>
     </div>
   </div>`;
@@ -26,7 +26,7 @@ export function mountVoice(root) {
   let closed = false, busy = false, permissionPending = false, enabled = true;
   let stream, recorder, recordingTimer, requestController;
   let sequence = 0, discard = false, lastReply = '', speechState = 'idle';
-  try { enabled = localStorage.getItem('wheelgentic-spoken-replies') !== 'off'; } catch {}
+  try { enabled = (localStorage.getItem('carechair-spoken-replies') ?? localStorage.getItem('wheelgentic-spoken-replies')) !== 'off'; } catch {}
   const status = text => { if (!closed) $('#voice-status').textContent = text; };
   const speaker = createSpeechPlayer(state => {
     if (closed) return;
@@ -133,7 +133,7 @@ export function mountVoice(root) {
   };
   $('#voice-sound').onclick = () => {
     enabled = !enabled; updateSound();
-    try { localStorage.setItem('wheelgentic-spoken-replies',enabled?'on':'off'); } catch {}
+    try { localStorage.setItem('carechair-spoken-replies',enabled?'on':'off'); } catch {}
     if (!enabled) speaker.stop();
   };
   $('#voice-replay').onclick = () => {

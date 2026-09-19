@@ -64,7 +64,7 @@ export function createProviders(config, fetchFn = fetch) {
         // Muse Spark uses the completion budget for both reasoning and the JSON answer.
         body: JSON.stringify({ model: config.metaModel, reasoning_effort: 'minimal', max_completion_tokens: 1600,
           messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...history, { role: 'user', content: transcript }],
-          response_format: { type: 'json_schema', json_schema: { name: 'wheelgentic_reply', strict: true, schema: interpretationSchema } },
+          response_format: { type: 'json_schema', json_schema: { name: 'carechair_reply', strict: true, schema: interpretationSchema } },
         }),
       }, 'Meta', config.timeoutMs);
       const content = data.completion_message?.content ?? data.choices?.[0]?.message?.content;
