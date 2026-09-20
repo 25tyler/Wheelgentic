@@ -557,6 +557,13 @@ class PoseFeed:
     # 15Hz budget, and it is the difference between a chair drawn where
     # this person is sitting and a chair drawn where an average person
     # would be.
+    # The longest an arm segment can be. An upper arm is about 300mm and a
+    # forearm 265mm on a typical adult; 500 is loose enough for anybody and
+    # tight enough to catch a sample that went past the person. Same spirit
+    # as _measure_body's 700mm guard, tighter because this rejects a single
+    # joint rather than a whole measurement.
+    MAX_SEGMENT_MM = 500.0
+
     LIMB_JOINTS = ("l_shoulder", "l_elbow", "l_wrist",
                    "r_shoulder", "r_elbow", "r_wrist",
                    "l_hip", "r_hip")
@@ -599,6 +606,31 @@ class PoseFeed:
             # projector distance and the sub-millimetre tail is pure wire
             # cost -- six joints of float64 repr is about four times this.
             out[name] = [round(float(c), 1) for c in p]
+
+        # A JOINT TOO FAR FROM THE ONE IT HANGS OFF IS NOT THAT JOINT. A
+        # depth sample that lands past the person -- on the wall, a doorway,
+        # the bunk behind them -- comes back perfectly confident about the
+        # wrong surface, and the result is an elbow metres from its own
+        # shoulder. Measured on the recording: 2.7% of upper-arm segments,
+        # the worst of them 1554mm for a link that is about 250.
+        #
+        # _measure_body already refuses these before they reach a dimension
+        # accumulator, so the BODY was safe while the POSE still drew them.
+        # The same rule belongs here, at the other consumer.
+        #
+        # Dropped, not clamped: a joint we cannot place is absent, and the
+        # page already handles a missing one. Pulling it to the nearest
+        # plausible distance would invent a position and draw it in the same
+        # colour as a measured one.
+        for parent, child in (("l_shoulder", "l_elbow"), ("l_elbow", "l_wrist"),
+                              ("r_shoulder", "r_elbow"), ("r_elbow", "r_wrist")):
+            a, b = out.get(parent), out.get(child)
+            if a is None or b is None:
+                continue
+            d = sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5
+            if d > self.MAX_SEGMENT_MM:
+                out.pop(child, None)
+
         if not out:
             return {}
         # THE SOURCE IS PER-FRAME, NOT A CONSTANT. "depth_measured" only when
