@@ -16,6 +16,8 @@ const assets = new Map([
   ['/voice-speech.js', ['voice-speech.js', 'text/javascript']],
   ['/vitals-client.js', ['vitals-client.js', 'text/javascript']],
   ['/robot-client.js', ['robot-client.js', 'text/javascript']],
+  // Tyler's: a care button opens the 3D cartoon framed for that task. His file, served from web/.
+  ['/carechair-embed.js', ['../web/carechair-embed.js', 'text/javascript']],
 ]);
 const audioTypes = new Set(['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/wav', 'audio/x-wav']);
 async function readBody(req, maxBytes) {

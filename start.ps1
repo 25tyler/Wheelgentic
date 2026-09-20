@@ -32,4 +32,6 @@ $env:ROBOT_BACKEND_URL = "http://127.0.0.1:8770"
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$root\carechair'; node server.js"
 
 Start-Sleep -Seconds 3
-Start-Process "http://127.0.0.1:5173"
+# The split view: the website on the left, the 3D view on the right (web/compare.html).
+# The website alone is http://127.0.0.1:5173
+Start-Process "http://127.0.0.1:8000/compare.html"
