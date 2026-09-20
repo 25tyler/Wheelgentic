@@ -108,7 +108,7 @@ case "$MODE" in
   # this rig has, so the obvious word is the safe one.
   real|real-swapped) start_bridge --left-can-port can1 --right-can-port can0 $AIM ;;
   restart)           rm -f "$KEEP"; start_bridge --left-can-port can1 --right-can-port can0 $AIM ;;
-  real-can0-left)    start_bridge --left-can-port can0 --right-can-port can1 ;;
+  real-can0-left)    start_bridge --left-can-port can0 --right-can-port can1 $AIM ;;
   mock)   start_bridge ;;
   stop)   stop_bridge ;;
   keep)   shift                  # the keeper: not for calling by hand

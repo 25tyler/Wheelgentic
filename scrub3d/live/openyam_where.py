@@ -106,7 +106,10 @@ for r in rel:
     T = None
     if T is None:
         import arms_live as AL
-        T = AL.base_pose(r, sx, sy, [float(T_wc[0, 3]), float(T_wc[1, 3])])
+        try:
+            T = AL.base_pose(r, sx, sy, [float(T_wc[0, 3]), float(T_wc[1, 3])])
+        except TypeError:      # the rig is seat-relative again (camera placement was reverted)
+            T = AL.base_pose(r, sx, sy)
     base_w = T[:3, 3]
     arm = st["arms"][side]
     p_arm = (np.asarray(arm["p"], float) - SIDE_OFFSET_M[side]) * 1000.0
