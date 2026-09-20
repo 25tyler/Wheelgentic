@@ -1,5 +1,43 @@
 # Wheelgentic
 
+A wheelchair that helps with the things people lose first: washing, drinking,
+eating, taking medication. You press one button and say what you need. Two
+robot arms on the chair do it, and the only picture anyone ever sees of you
+is a cartoon.
+
+**The whole application is in this branch.** Three pieces, one tree:
+
+| | what it is | where |
+|---|---|---|
+| **The website** | voice (press the button or the chair's button A, then speak), spoken replies, care screens, the room thermometer and the chair's buttons through an Arduino | `carechair/` |
+| **The robot backend** | takes the website's command and runs one task at a time on the two OpenYAM arms, then folds them away and waits | `scrub3d/live/carebot.py` |
+| **What you see** | the cartoon that mirrors you, and the arms with what they plan in 3D, both on the website | `web/`, Rerun |
+
+Say **"I'd like a shower"** and the arms scrub your arms, following you with a
+depth camera, until you say **"stop"**. Say **"bring me water"**, **"help me
+eat"** or **"time for my meds"** and an arm takes the bottle to your mouth,
+tips it, and puts it back. Then it waits for the next request.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File start.ps1        # the real arms
+powershell -ExecutionPolicy Bypass -File start.ps1 -Dry   # nothing real moves: a recording, simulated joints
+```
+
+It needs `carechair/.env` (Deepgram and Meta keys; see `carechair/.env.example`)
+and, for the real arms, the dimOS bridge running beside them
+(`scrub3d/live/DIMOS.md`). How the arms are kept off a person is in
+`scrub3d/live/README.md`; how a bottle gets to a mouth is at the top of
+`scrub3d/live/drink.py`. Honest state: the scrub and the drink have each run
+on the real arms by hand; driving them from the website's voice commands is
+proven end to end only with simulated arms so far.
+
+What follows is the first demo this grew from, one small arm and a projector,
+which still runs.
+
+---
+
+## The first demo: one arm, a sponge, and a cartoon
+
 A robot arm with a sponge scrubs your forearm. A goofy low-poly cartoon on the
 projector mirrors your pose, and the dirt splotches on it pop with soap
 bubbles as the real arm actually scrubs.
