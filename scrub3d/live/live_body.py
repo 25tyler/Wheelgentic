@@ -2115,7 +2115,24 @@ def main():
     view = not a.no_viewer
     if view:
         rr.init("wheelgentic3d_live_body", spawn=False)
-        rr.spawn(port=a.viewer_port, connect=False)
+        # SPAWN ONLY IF NOBODY IS ALREADY LISTENING. rr.spawn starts the
+        # desktop viewer, and a desktop window cannot be put beside her UI in
+        # a browser. `rerun --serve-web` hosts the SAME viewer over HTTP and
+        # accepts SDK connections on the same gRPC port, so when one is
+        # already up this connects to it and the render appears in the page
+        # instead of on the desktop.
+        #
+        # Checked by connecting a socket rather than by a flag, because the
+        # server is usually started by hand and would not know about a flag.
+        import socket as _sock
+        _up = False
+        try:
+            with _sock.create_connection(("127.0.0.1", a.viewer_port), 0.4):
+                _up = True
+        except OSError:
+            _up = False
+        if not _up:
+            rr.spawn(port=a.viewer_port, connect=False)
         rr.connect_grpc(f"rerun+http://127.0.0.1:{a.viewer_port}/proxy")
         rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
         rr.send_blueprint(blueprint())

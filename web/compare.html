@@ -8,17 +8,15 @@
   Take Meds and our 3D view opens over it, exactly as it does for a person
   using the product.
 
-  Right: the same person drawn from the numbers on the 15Hz socket -- the
-  measured skeleton, joint by joint, with the millimetres printed beside it.
-  Nothing here is posed or animated; every line is two points the depth
-  camera measured.
+  Right: scrub3d/live/live_body.py, in its own Rerun viewer. His point
+  cloud, his fitted body model, his measurements panel -- the same window he
+  gets on the desktop, hosted over HTTP so it can sit beside her UI.
 
-  WHY THIS IS NOT JUSTIN'S RERUN WINDOW. His live view logs to Rerun, which
-  is a desktop application: the SDK is installed here, the viewer binary is
-  on neither machine, and rerun 0.38 has no serve_web to embed it in a page.
-  So this draws HIS DATA rather than his render. The comparison that matters
-  survives -- both panels come from the same joints, so a cartoon elbow that
-  disagrees with the measurement is visible immediately.
+  This used to be a canvas drawing his joint positions, which was a second
+  implementation of a thing that already existed. The viewer ships inside
+  the rerun-sdk wheel (the installed copy was missing it) and `--serve-web`
+  hosts it while accepting the SDK connection on the same gRPC port, so
+  live_body.py logs into a browser instead of a desktop window.
 -->
 <style>
   :root {
@@ -33,14 +31,6 @@
          background: var(--panel); }
   .body { flex: 1 1 auto; position: relative; min-height: 0; }
   iframe { width: 100%; height: 100%; border: 0; display: block; }
-  canvas { width: 100%; height: 100%; display: block; }
-  #nums { position: absolute; left: 14px; bottom: 12px; pointer-events: none;
-          color: var(--dim); font-size: 11px; white-space: pre;
-          text-shadow: 0 1px 3px #0d1017; }
-  .tag { position: absolute; right: 14px; top: 12px; pointer-events: none;
-         padding: 1px 7px; border-radius: 9px; font-size: 10px;
-         border: 1px solid currentColor; background: rgba(13,16,23,.6); }
-  .ok { color: var(--live); } .no { color: var(--stale); }
 </style>
 
 <div class="wrap">
@@ -49,149 +39,24 @@
   </div>
 
   <div class="col">
-    <div class="body">
-      <canvas id="cv"></canvas>
-      <!-- OVERLAID, NOT A BAR. The numbers still matter -- this panel exists
-           to be checked against -- but a strip across the bottom took height
-           from both panels to show text that is only about one of them. -->
-      <div class="tag no" id="state">waiting</div>
-      <div id="nums">no data yet</div>
-    </div>
+    <!-- HIS VIEWER, NOT A DRAWING OF HIS DATA. `rerun --serve-web` hosts the
+         same viewer his live view spawns on the desktop, over HTTP, and
+         accepts the SDK connection on the same gRPC port. live_body.py logs
+         into it and this iframe shows the result: his point cloud, his
+         fitted body, his measurements panel.
+
+         Start it with tools/compare.sh, which brings up the viewer, his live
+         view against a recording, our backend and the page. -->
+    <iframe src="http://127.0.0.1:9090?url=rerun%2Bhttp%3A%2F%2Flocalhost%3A9876%2Fproxy"
+            title="live_body.py through the Rerun web viewer"
+            allow="cross-origin-isolated"></iframe>
   </div>
 </div>
 
 <script>
-// ---------------------------------------------------------------------------
-// The measured skeleton, drawn from the same socket the 3D view reads.
-//
-// DELIBERATELY NOT three.js. This panel's whole job is to be the thing the
-// cartoon is CHECKED AGAINST, so it draws the numbers as directly as
-// possible: two points, a line between them, the millimetres printed. A
-// second 3D engine here would add its own camera, its own conventions and
-// its own chances to be wrong in a way that looks plausible.
-// ---------------------------------------------------------------------------
-const BONES = [
-  ['l_shoulder', 'l_elbow'], ['l_elbow', 'l_wrist'],
-  ['r_shoulder', 'r_elbow'], ['r_elbow', 'r_wrist'],
-  ['l_shoulder', 'r_shoulder'],
-  ['l_shoulder', 'l_hip'], ['r_shoulder', 'r_hip'], ['l_hip', 'r_hip'],
-];
-const cv = document.getElementById('cv');
-const ctx = cv.getContext('2d');
-const stateEl = document.getElementById('state');
-const numsEl = document.getElementById('nums');
-
-let joints = null, src = null, lastAt = 0;
-
-function fit() {
-  const r = cv.getBoundingClientRect(), d = window.devicePixelRatio || 1;
-  cv.width = Math.max(1, r.width * d); cv.height = Math.max(1, r.height * d);
-  ctx.setTransform(d, 0, 0, d, 0, 0);
-}
-addEventListener('resize', fit); fit();
-
-function draw() {
-  const r = cv.getBoundingClientRect();
-  ctx.clearRect(0, 0, r.width, r.height);
-  ctx.fillStyle = '#0d1017'; ctx.fillRect(0, 0, r.width, r.height);
-
-  if (!joints) {
-    ctx.fillStyle = '#7c8798'; ctx.font = '12px ui-monospace, monospace';
-    ctx.fillText('waiting for the backend on ws://127.0.0.1:8765', 16, 28);
-    return requestAnimationFrame(draw);
-  }
-
-  // WORLD mm -> screen. x is the way the person faces, y is their left, z is
-  // up: so a FRONT view is (y, z) and y grows to the LEFT, which is why the
-  // x term is negated. Scale from the actual spread each frame rather than a
-  // constant, so a small person fills the panel as a large one does.
-  const pts = Object.values(joints);
-  const ys = pts.map(p => p[1]), zs = pts.map(p => p[2]);
-  const cy = (Math.min(...ys) + Math.max(...ys)) / 2;
-  const cz = (Math.min(...zs) + Math.max(...zs)) / 2;
-  const spread = Math.max(Math.max(...ys) - Math.min(...ys),
-                          Math.max(...zs) - Math.min(...zs), 1);
-  const s = Math.min(r.width, r.height) * 0.62 / spread;
-  const X = p => r.width / 2 - (p[1] - cy) * s;
-  const Y = p => r.height / 2 - (p[2] - cz) * s;
-
-  ctx.lineWidth = 2; ctx.strokeStyle = '#3d7fb5';
-  for (const [a, b] of BONES) {
-    if (!joints[a] || !joints[b]) continue;
-    ctx.beginPath();
-    ctx.moveTo(X(joints[a]), Y(joints[a]));
-    ctx.lineTo(X(joints[b]), Y(joints[b]));
-    ctx.stroke();
-  }
-  ctx.font = '10px ui-monospace, monospace';
-  for (const [name, p] of Object.entries(joints)) {
-    const x = X(p), y = Y(p);
-    ctx.fillStyle = '#57d08a';
-    ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#7c8798';
-    // The distance FROM THE CAMERA is the number depth actually measured, so
-    // it is the one worth printing beside the dot.
-    ctx.fillText(`${name} ${Math.round(p[0])}`, x + 8, y - 6);
-  }
-  requestAnimationFrame(draw);
-}
-requestAnimationFrame(draw);
-
-function connect() {
-  let ws;
-  try { ws = new WebSocket('ws://127.0.0.1:8765'); }
-  catch (_) { return setTimeout(connect, 1500); }
-  ws.onmessage = (e) => {
-    let m; try { m = JSON.parse(e.data); } catch (_) { return; }
-    if (m.limbs && m.limbs.mm) {
-      // ONLY WHAT WAS MEASURED GOES IN THIS PANEL. The wire carries every
-      // joint vision.py has, and the ones depth could not reach fall back to
-      // MediaPipe's estimate placed by a seated-adult constant. Drawing both
-      // in the same skeleton put the hips at z=1050 against shoulders at
-      // z=265 and stood the person on their head.
-      //
-      // This panel exists to be the measurement the cartoon is checked
-      // against, so an estimate in it is worse than a missing limb: a gap is
-      // legible, a guess drawn in the same blue is not.
-      // The backend names them: `measured_names` is the subset a depth
-      // sensor actually reached this frame. Filtering by that rather than by
-      // a list kept here means a joint that starts or stops being measurable
-      // needs no change on this side.
-      const named = Array.isArray(m.limbs.measured_names)
-        ? new Set(m.limbs.measured_names) : null;
-      const only = {};
-      for (const [k, v] of Object.entries(m.limbs.mm)) {
-        if (!named || named.has(k)) only[k] = v;
-      }
-      joints = Object.keys(only).length ? only : null;
-      src = m.limbs.src; lastAt = performance.now();
-      stateEl.textContent = `${src}  ${m.limbs.measured ?? '?'}/${m.limbs.total ?? '?'} measured`;
-      stateEl.className = 'tag ' + (src === 'depth_measured' ? 'ok' : 'no');
-    }
-    if (m.body && m.body.mm) {
-      const c = m.body.confidence || {};
-      const rows = Object.entries(m.body.mm)
-        .map(([k, v]) => `  ${k.padEnd(20)} ${String(v).padStart(7)} mm   ` +
-             ((c[k] ?? 0) >= 0.5 ? `measured (${c[k]})` : 'typical adult'))
-        .join('\n');
-      numsEl.textContent =
-        `body, from ${m.body.n_frames} frames of depth\n${rows}`;
-    }
-  };
-  // A DROPPED SOCKET IS A NORMAL EVENING HERE. The backend gets restarted
-  // constantly while this is being worked on, so reconnect quietly rather
-  // than needing the page reloaded.
-  ws.onclose = () => { stateEl.textContent = 'backend gone'; stateEl.className = 'tag no'; setTimeout(connect, 1500); };
-  ws.onerror = () => { try { ws.close(); } catch (_) {} };
-}
-connect();
-
-// Stale means the person left the frame, and a held pose would be a person
-// standing where they are not.
-setInterval(() => {
-  if (joints && performance.now() - lastAt > 2000) {
-    joints = null;
-    stateEl.textContent = 'no person'; stateEl.className = 'tag no';
-  }
-}, 500);
+// Nothing to drive from here: both panels are live applications in their own
+// right. Her UI talks to her server, and the Rerun viewer talks to
+// live_body.py over gRPC. This page is the frame that holds them side by
+// side, and a page that only positions two iframes should not also be
+// re-implementing what is inside them.
 </script>
