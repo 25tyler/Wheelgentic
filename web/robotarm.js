@@ -619,6 +619,20 @@ export function makeRobotArm(scene, ramp, region) {
       root.updateWorldMatrix(true, true);
       obj.updateWorldMatrix(true, false);
       wrist.attach(obj);
+      // HELD IN THE CLAW, NOT WHEREVER IT HAPPENED TO BE. .attach preserves
+      // the world position, which is right for the reparent itself -- the
+      // prop must not jump on the frame it is grabbed -- but it also
+      // preserves whatever gap existed at that moment. The claw closes on a
+      // point; the bowl was a few centimetres off it, so the whole carry
+      // showed a bowl floating beside the hand rather than in it.
+      //
+      // So the local position is then snapped to the tool point, the same
+      // way the sponge has a fixed offset on this group rather than a
+      // remembered one. GEOM.d_eoat is the claw's own width, so half of it
+      // puts the prop against the jaws instead of inside them.
+      obj.position.set(0, SPONGE_CHAIN - GEOM.shoulder_pivot - GEOM.upper
+                          - GEOM.fore + GEOM.d_eoat * 0.5, 0);
+      obj.rotation.set(0, 0, 0);
       return true;
     },
 
