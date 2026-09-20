@@ -378,32 +378,121 @@ class Feed:
         asyncio.run(main())
 
 
-def park(endpoint=None):
-    """Both arms to the initial position: folded at the person's front, claws
-    shut, by arm_dimos's own planned start pose (one arm at a time, drawn back
-    before it turns). -> what happened, in words. UNPROVEN on the arms from
-    here: by hand the same call runs inside the live view."""
+INITIAL_FILE = os.path.join(LOGS, "initial_pose.json")
+COMPACT = [0.3, 0.2, 0.0, 0.0, 0.0]      # shoulder, elbow, wrist x3: the claw drawn back to its base
+STOP_ROOM = 0.18                         # dimOS refuses a goal that sits on a joint stop
+
+
+def _arms(endpoint):
     os.environ["SCRUB3D_ARM"] = "openyam"
     for p in (S3D, HERE):
         if p not in sys.path:
             sys.path.insert(0, p)
+    import arm_dimos
+    from arms_live import base_pose
+    with open(RIG, encoding="utf-8") as f:
+        rel = json.load(f)["arms"]
+    hw = arm_dimos.Hardware.connect(endpoint, log=lambda *_: None)
+    hw.place([base_pose(r) for r in rel[:2]])
+    hw._poll_once()
+    return hw
+
+
+def learn_initial(endpoint=None, force=False):
+    """Keep where the arms are NOW as the initial position: how they lie folded
+    when the day begins, which is where a stop should put them back. Read
+    each time this starts and finds them folded, and kept in drive_logs;
+    --learn-initial takes whatever pose they are in. -> words"""
     try:
-        import arm_dimos
-        from arms_live import base_pose
-        with open(RIG, encoding="utf-8") as f:
-            rel = json.load(f)["arms"]
-        hw = arm_dimos.Hardware.connect(endpoint, log=lambda *_: None)
+        hw = _arms(endpoint)
         try:
-            hw.place([base_pose(r) for r in rel[:2]])  # which way is the front: no seat needed
-            hw._poll_once()
-            hw.close_claws()
-            rep = hw.home(speed=0.3)
+            q = {arm.side: arm.real_joints6() for arm in hw.arms.values()}
         finally:
             hw.link.close()
-        return ("the arms are folded at the front, claws shut" if rep.get("ok")
-                else f"could not fold the arms to the front: {rep.get('error')}")
+        if not all(q.values()):
+            return "no joint reading yet: the initial position is not known"
+        # Only a FOLDED pose is a beginning. A start in the middle of a day
+        # finds the arms wherever the last task left them, and that must not
+        # become where a stop puts them: then the pose kept from earlier stands.
+        folded = all(v[1] < 0.6 and v[2] < 0.8 for v in q.values())
+        if not folded and not force:
+            return ("the arms are not folded now, so the initial position is "
+                    + ("the one kept from earlier" if os.path.exists(INITIAL_FILE)
+                       else "not known yet: a stop will fold them at the front"))
+        with open(INITIAL_FILE, "w", encoding="utf-8") as f:
+            json.dump(q, f)
+        return "initial position kept: " + ", ".join(
+            f"{k} {[round(v, 2) for v in v6]}" for k, v6 in q.items())
     except Exception as exc:                                    # noqa: BLE001
-        return f"could not fold the arms to the front: {exc}"
+        return f"could not read the initial position: {exc}"
+
+
+def park(endpoint=None):
+    """Both arms back to the initial position, the way they lay folded when the
+    day began (learn_initial), claws shut, powered and holding. One arm at a
+    time with the other pinned where it is, and never extended while it turns:
+    the claw is first drawn back to its own base where it stands, turned there,
+    and only then laid into the folded pose (arm_dimos.Hardware._stages_for,
+    which learned that on a leg). A folded arm lies ON its joint stops and
+    dimOS refuses a goal there, so the goal is that pose held STOP_ROOM off
+    every stop: a finger's width above where it lay. Without a kept pose it
+    is arm_dimos's own start pose at the front. -> words. UNPROVEN on the arms."""
+    try:
+        hw = _arms(endpoint)
+    except Exception as exc:                                    # noqa: BLE001
+        return f"could not fold the arms away: {exc}"
+    try:
+        import numpy as np
+        import arm_dimos
+        hw.close_claws()
+        try:
+            with open(INITIAL_FILE, encoding="utf-8") as f:
+                initial = json.load(f)
+        except (OSError, ValueError):
+            rep = hw.home(speed=0.3)
+            return ("no initial position kept: the arms are folded at the front, claws shut"
+                    if rep.get("ok") else f"could not fold the arms: {rep.get('error')}")
+        lim = np.array([[-2.61799, 3.14159], [0.0, 3.66519], [0.0, 3.14159],
+                        [-1.69297, 1.5708], [-1.5708, 1.5708], [-2.0944, 2.0944]])
+        missed = []
+        for arm in list(hw.arms.values()):
+            goal = np.clip(np.array(initial[arm.side], float),
+                           lim[:, 0] + STOP_ROOM, lim[:, 1] - STOP_ROOM)
+            now = arm.real_joints6()
+            if not now:
+                missed.append(f"{arm.side}: no joint reading")
+                continue
+            stages = []
+            if abs(now[0] - goal[0]) > 0.35:             # pointing elsewhere: tuck, then turn
+                stages += [[float(now[0])] + COMPACT, [float(goal[0])] + COMPACT]
+            stages.append([float(v) for v in goal])
+            for i, g in enumerate(stages):
+                hw._poll_once()
+                now = arm.real_joints6()
+                if now and max(abs(a - b) for a, b in zip(now, g)) < hw.STAGE_REACHED_RAD:
+                    continue
+                joints = {arm.side: g}
+                for other in hw.arms.values():
+                    q = other.real_joints6()
+                    if other.side != arm.side:
+                        if not q:
+                            return "no reading of the other arm: nothing is moved without one"
+                        joints[other.side] = list(q)     # pinned: never dimOS's own home
+                plan = hw.link.call({"op": "home", "speed": 0.3, "joints": joints,
+                                     "close": True}, timeout=30.0)
+                off = hw._wait_joints(arm, g, 45.0) if plan.get("ok") else None
+                if off is None or off > 2.0 * hw.STAGE_REACHED_RAD:
+                    if (now and hw._only_yaw(now, g) and hw._stream_yaw(arm, g[0])):
+                        continue                         # the turn dimOS refuses, streamed
+                    missed.append(f"{arm.side} step {i + 1}: "
+                                  + str(plan.get("error") or f"stopped {off} rad short"))
+                    break
+        return ("the arms are back in their initial position, folded, claws shut" if not missed
+                else "could not fold every arm away: " + "; ".join(missed))
+    except Exception as exc:                                    # noqa: BLE001
+        return f"could not fold the arms away: {exc}"
+    finally:
+        hw.link.close()
 
 
 # --- the views, on the website -------------------------------------------------------
@@ -548,6 +637,8 @@ def main():
     ap.add_argument("--webcam-pose", action="store_true",
                     help="leave the cartoon's pose to the browser's own camera instead of "
                          "driving it from the depth camera's joints")
+    ap.add_argument("--learn-initial", action="store_true",
+                    help="take the arms' pose NOW as the initial position a stop returns them to")
     ap.add_argument("--no-watch", action="store_true",
                     help="no live 3D render between tasks (it uses the camera)")
     ap.add_argument("--no-views", action="store_true", help="do not serve the cartoon or Rerun")
@@ -559,6 +650,8 @@ def main():
     g = globals()
     g["RERUN_PORT"], g["RERUN_WEB_PORT"], g["PAGE_PORT"] = a.rerun_port, a.rerun_web_port, a.page_port
     a.endpoint = a.endpoint or scrub_settings().get("SCRUB3D_DIMOS")
+    if a.real:
+        print("  " + learn_initial(a.endpoint, force=a.learn_initial), flush=True)
     bot = Bot(a)
     Feed(bot)
     views = [] if a.no_views else start_views(a)
