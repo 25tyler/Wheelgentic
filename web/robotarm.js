@@ -411,6 +411,44 @@ export function makeRobotArm(scene, ramp, region) {
   const HOVER  = { sh:  0.30, el: 0.55 };   // above the forearm, not touching
   const CONTACT= { sh:  0.46, el: 0.40 };   // pressed onto it
 
+  // ---- THE FEED BEAT'S TWO POSES. Down at the tray, and up at the mouth.
+  //
+  // MEASURED OFF THIS ARM, NOT TYPED FROM TASTE. Each was found by driving
+  // the joints and reading toolWorld() back, because the numbers that matter
+  // are where the CLAW lands and there is no way to get those from angles by
+  // inspection. On the feeding arm (fleet[1], rolled 45 degrees about Z on
+  // its mount) they put the claw at:
+  //
+  //   TRAY  ->  (-1.06, 1.52, 0.67)   out to the arm's own side, beside its
+  //                                    mount, where a bowl can sit
+  //   MOUTH ->  (-0.21, 1.48, 0.59)   in front of the seated head, which is
+  //                                    measured at (0.00, 1.48, -0.07)
+  //
+  // The mouth pose sits about two thirds of a unit IN FRONT of the face rather
+  // than on it, and level with it. That gap is the picture: a spoon offered to
+  // someone, not pushed into their head.
+  //
+  // WHY THE TRAY IS NEAR REST AND NOT DOWN ON THE FLOOR. These springs are
+  // heavily damped, and a pose far from the one the arm is holding takes over
+  // three seconds to close on (measured on this arm: 0.81 units of error still
+  // left at 300ms and 0.22 at 3000ms, for a tray pose down at sh 0.90). A
+  // mouthful is 1.6 to 2.2 seconds, so the claw would never arrive and the
+  // grab would be honestly refused every time -- a bowl sitting on the tray for
+  // the whole beat while the counter ticked. From rest, this tray closes to
+  // within 0.005 in 1.2 seconds. The arm's own dynamics decide where the tray
+  // can be; that is the constraint, and it is a real one.
+  //
+  // WHY POSES AND NOT reachTo(). solveIK models a yaw and two links rotating
+  // about X; this arm is also rolled 45 degrees about Z by its measured mount,
+  // which that decomposition does not carry. Asking it for a world point on
+  // this arm lands the claw over half a unit away (measured: 0.61 to 0.82 for
+  // every point tried along the tray-to-mouth line, including the point the
+  // claw was already sitting on). Two poses read off the real workspace are
+  // honest about what this drawing can solve; a solver that misses by 0.7 and
+  // is called anyway is not.
+  const FEED_TRAY  = { yaw: -0.25, sh: 0.00, el: 1.05 };
+  const FEED_MOUTH = { yaw:  1.00, sh: 0.80, el: 1.50 };
+
   let target = { ...REST };
   let cur    = { ...REST };
   let vel    = { sh: 0, el: 0 };
@@ -551,6 +589,115 @@ export function makeRobotArm(scene, ramp, region) {
     // passes by asserting on undefined -- the exact trap __wheelgentic's own comment
     // warns about for the arm handle.
     sponge,
+    // THE WRIST GROUP, which is the arm's hand. Exposed for the same reason
+    // the sponge is: a caller that wants to hang something off the tool end
+    // otherwise has to traverse root->upper->fore->? and guess which group is
+    // the last one that turns. The sponge is parented HERE, and so is
+    // anything grip() takes hold of.
+    wrist,
+
+    /** TAKE HOLD OF SOMETHING. After this the object is part of the arm: it
+     *  moves because the wrist moves, and nothing may tween its position.
+     *
+     *  .attach, NEVER .add. Object3D.attach recomputes the child's local
+     *  transform so its WORLD transform is unchanged by the reparenting;
+     *  .add keeps the local transform and therefore teleports the object by
+     *  however far the two parents are apart. A bowl sitting on the tray that
+     *  jumps to the arm root the instant the claw closes is the exact tell
+     *  that says these two things were never connected.
+     *
+     *  The tool-tip offset is the sponge's own y, so a gripped prop sits
+     *  where the sponge sits -- the one place on this arm that was solved
+     *  against a measurement rather than picked by eye.
+     */
+    grip(obj) {
+      if (!obj) return false;
+      // World matrices must be current or .attach preserves a stale world
+      // position: the arm's springs move `cur` every frame and three.js only
+      // rebuilds matrices at render time, so grabbing between renders would
+      // read last frame's pose.
+      root.updateWorldMatrix(true, true);
+      obj.updateWorldMatrix(true, false);
+      wrist.attach(obj);
+      return true;
+    },
+
+    /** LET GO, back into `parent` (the scene, normally). Same .attach rule in
+     *  reverse: the prop stays exactly where the claw left it rather than
+     *  snapping back to whatever local position it had before the grab. */
+    release(obj, parent) {
+      if (!obj) return false;
+      const dest = parent || obj.parent?.parent || scene;
+      root.updateWorldMatrix(true, true);
+      dest.updateWorldMatrix(true, false);
+      dest.attach(obj);
+      return true;
+    },
+
+    /** DRIVE THE FEED TRAVEL: 0 is the tray, 1 is the mouth.
+     *
+     *  It writes the pose TARGETS and lets the same springs everything else
+     *  here travels on carry the arm there, so the arm arrives with the mass
+     *  and settle the rest of the page has. The page tweens `t`; the claw's
+     *  position is whatever the linkage makes of it, which is the point --
+     *  a prop held in that claw moves because these angles moved.
+     *
+     *  Pass null to hand the arm back to setPhase.
+     */
+    feedPose(t) {
+      if (t === null || t === undefined) return;
+      const k = t < 0 ? 0 : (t > 1 ? 1 : t);
+      const lerp = (a, b) => a + (b - a) * k;
+      target = { sh: lerp(FEED_TRAY.sh, FEED_MOUTH.sh),
+                 el: lerp(FEED_TRAY.el, FEED_MOUTH.el) };
+      yawTarget = lerp(FEED_TRAY.yaw, FEED_MOUTH.yaw);
+      // A STANDING REACH POINT WOULD OVERWRITE ALL OF THAT. update() prefers
+      // reachPt over the pose target every frame, so a feed entered straight
+      // out of a scrub would have the arm still solving for the last sponge
+      // position and never travel at all.
+      reachPt = null;
+    },
+
+    /** WHERE THE CLAW WOULD BE at travel fraction `t`, without moving it.
+     *
+     *  The page asks this once per mouthful to find out where the tray is --
+     *  "the tray" being wherever the arm can actually put the claw, rather
+     *  than a constant typed beside it. It has to be a QUESTION and not a
+     *  pose change: snapping the drawn arm to the tray to read its position
+     *  would teleport it on screen every time a mouthful starts, which is the
+     *  same lie in a different place.
+     *
+     *  It poses the chain, reads the matrix and puts every angle back, so the
+     *  drawn arm is byte-identical afterwards. Cheap enough to call per
+     *  mouthful; do not call it per frame.
+     */
+    feedPoseWorld(t, out) {
+      const k = t < 0 ? 0 : (t > 1 ? 1 : t);
+      const lerp = (a, b) => a + (b - a) * k;
+      const keep = { y: yaw.rotation.y, u: upper.rotation.x, f: fore.rotation.x };
+      yaw.rotation.y   = clampJoint('yaw', lerp(FEED_TRAY.yaw, FEED_MOUTH.yaw));
+      upper.rotation.x = clampJoint('sh',  lerp(FEED_TRAY.sh,  FEED_MOUTH.sh));
+      fore.rotation.x  = clampJoint('el',  lerp(FEED_TRAY.el,  FEED_MOUTH.el));
+      root.updateWorldMatrix(true, true);
+      const v = (out || new THREE.Vector3()).setFromMatrixPosition(sponge.matrixWorld);
+      // BACK EXACTLY AS IT WAS, and the matrices rebuilt with it -- leaving a
+      // stale world matrix behind would have the very next grip() attach a
+      // prop against the pose this question posed rather than the pose the
+      // arm is holding.
+      yaw.rotation.y = keep.y; upper.rotation.x = keep.u; fore.rotation.x = keep.f;
+      root.updateWorldMatrix(true, true);
+      return v;
+    },
+
+    /** Where the claw is, in world space. The page needs this to know whether
+     *  the arm ACTUALLY arrived at the tray before the grab -- the rule is
+     *  that a prop cannot be picked up by an arm that never got there. */
+    toolWorld(out) {
+      const v = out || new THREE.Vector3();
+      sponge.updateWorldMatrix(true, false);
+      return v.setFromMatrixPosition(sponge.matrixWorld);
+    },
+
     /** Park it beside the character's scrubbed arm. */
     placeNear(x, y, z) { root.position.set(x, y, z); },
 
@@ -716,10 +863,27 @@ export function makeRobotArm(scene, ramp, region) {
         root.updateWorldMatrix(true, false);
         _p.copy(reachPt);
         root.worldToLocal(_p);
-        const s = solveIK(_p.y, _p.z);
+        // ALL THREE COORDINATES, IN THE ORDER solveIK DECLARES THEM. This read
+        // `solveIK(_p.y, _p.z)` -- two arguments to a three-argument function,
+        // so the solver got x=_p.y, y=_p.z and z=undefined, and every
+        // `Math.hypot(x, z)` inside it returned NaN. A NaN shoulder angle goes
+        // into three.js without an error anywhere, which is exactly the silent
+        // failure solveIK's own clamp comment warns about, and it meant the
+        // whole reach path had been drawing no pose at all rather than a wrong
+        // one. Caught by gripping a prop and watching it vanish.
+        const s = solveIK(_p.x, _p.y, _p.z);
         // A REFUSED SOLVE HOLDS THE LAST TARGET. Same rule the FSM uses when
         // the governor says no (py/scrubbot.py: `arm.hold()`): an unreachable
         // point must not snap the arm anywhere, it must leave it where it is.
+        //
+        // THE SOLVED YAW IS DELIBERATELY NOT APPLIED. solveIK returns one, and
+        // feeding it to yawTarget was tried: on an arm rolled about Z by its
+        // measured mount the yaw the planar decomposition wants is not the yaw
+        // that swings the working plane onto the target, so it turned the base
+        // away from the point it was reaching for. The scrub has always run
+        // with the base still and lands on the limb; leaving it still is the
+        // behaviour that was measured to work. See FEED_TRAY above for why the
+        // feed beat uses poses instead of this path at all.
         if (s) target = { sh: s.sh, el: s.el };
       }
       for (const j of ['sh', 'el']) {

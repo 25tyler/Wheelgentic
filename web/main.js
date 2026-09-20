@@ -149,8 +149,15 @@ const BODY_Z =  0.55;
 // than floating; checked on a projector-sized frame at the moment feed opens.
 // MOUTH is in front of the seated character's face, solved off the head
 // bone's measured world position (1.481) rather than guessed.
+// WHERE THE PROPS PARK AT BOOT, and nothing else. It used to be half of a
+// pair with a BOWL_MOUTH constant, and a 1.5s tween carried the bowl between
+// the two -- which meant the bowl made the same trip whether the arm moved or
+// not. The carry is the arm's now (see liftBowl), so the mouth constant is
+// gone and the tray is measured per mouthful from where the claw lands.
+//
+// This one stays because the props are loaded long before the fleet exists,
+// and a bowl has to sit somewhere until an arm can be asked where its tray is.
 const BOWL_REST  = { x: -1.05, y: 0.70, z: 0.35 };
-const BOWL_MOUTH = { x: -0.30, y: 1.30, z: 0.42 };
 const SEAT_SURFACE_Y = FLOOR_Y + CHAIR_H * CHAIR_SCALE * SEAT_FRAC;
 const SEATED_ROOT_Y  = SEAT_SURFACE_Y - THIGH_OFF;
 
@@ -835,6 +842,29 @@ let sensorLed = null;
 let spoon = null;
 let bowlTween = null;
 let glass = null;
+// ---- THE FEED CARRY'S STATE. Up here with the other prop state rather than
+// beside liftBowl, because stepFeedCarry() runs from the render loop and a
+// `const` further down the module is in its temporal dead zone until the
+// module body reaches it. The loop starts last today; this makes that not
+// matter.
+//
+// HOW FAR ALONG THE CARRY THE ARM IS: 0 at the tray, 1 at the mouth. The one
+// number animated during the feed beat, and it is a POSE fraction rather than
+// a world point -- the arm turns it into joint angles and the claw's position
+// is whatever the linkage makes of that. An object rather than a bare number
+// because gsap tweens properties, not variables.
+const feedCarry = { t: 0 };
+// Where the claw lands at travel 0, measured at the start of each mouthful.
+// The prop is put HERE rather than at a typed constant, so "the tray" is
+// defined by where the arm can actually reach and not by a number beside it.
+const feedTray = new THREE.Vector3();
+// True while stepFeedCarry should keep pushing feedCarry.t at the arm. Cleared
+// on release and on leaving the mode, because a reach left standing overrides
+// setPhase('rest') forever and the arm would never park.
+let feedReaching = false;
+// The prop currently in the claw, so an estop or a mode change can put it
+// back rather than leaving it parented to an arm that has folded away.
+let feedHeld = null;
 // Set by the voice intent for pills, read by the feed mode on the very next
 // tick. A flag rather than a second mode, because to the machine it IS the
 // same job -- lift something to the person's mouth -- and only the payload
@@ -967,6 +997,9 @@ function stepArms(dt) {
   const washing = mode === 'shower' && (cycleLive || choreoInterval !== null);
   const done = recs.length ? cleaned / recs.length : 0;
   stepSteam(dt, washing ? 0.30 + done * 0.45 : 0);
+  // BEFORE arm.update, so the reach point this frame is the one the solve
+  // reads. After it, the arm would be a frame behind the prop it is carrying.
+  stepFeedCarry();
   if (fleet.length) { fleet.forEach(({ arm }) => arm.update(dt)); return; }
   robot?.update(dt);        // before the fleet is built
 }
@@ -1204,6 +1237,11 @@ const MODES = {
                 if (given >= total) {
                   // Land on the last one and stop, rather than looping back
                   // to zero while a judge is watching the number.
+                  // THE PROP GOES BACK FIRST. It is a child of the wrist now,
+                  // so parking the arm without releasing would fold the bowl
+                  // away with it -- and setPhase cannot help, because a
+                  // standing reach point overrides every pose target.
+                  feedDrop();
                   fleet[1]?.arm.setPhase('rest');
                   // THE BEAT IS OVER, SO THE CARE COUNT STOPS. `mode` stays
                   // 'feed' until the operator presses another mode key, and
@@ -1229,16 +1267,33 @@ const MODES = {
                   pillsRequested ? 2200 : drinkRequested ? 1900 : 1600));
               };
 
+              // THE ARM GOES TO THE TRAY FIRST, and the prop is put where its
+              // claw lands. Nothing is served until that travel has happened,
+              // because the arm's springs are slow and a grab fired before it
+              // arrived is honestly refused -- the bowl would then sit on the
+              // tray for the whole beat while the counter ticked.
+              feedBegin(prop);
               modeTimers.push(setTimeout(() => {
-                fleet[1]?.arm.setPhase('hover');
                 // ONE arm is working, so light ONLY its territory. This is
                 // what focus() exists for: the audience can see which part of
                 // the body that arm is responsible for while it feeds.
                 if (territories && territoriesOn) territories.focus(1);
                 serve();
-              }, 400));
+                // 1500, NOT 400. That was the gap before the arm had anywhere
+                // to travel to; now it has to reach the tray before the first
+                // mouthful, and the spring takes about that long to close on a
+                // new pose (measured: 0.81 units of error at 300ms, 0.22 at
+                // 3000ms on this arm). Short of this and the first serve grabs
+                // nothing.
+              }, 1500));
             },
             leave: () => {
+              // RELEASE BEFORE HIDING. A prop left parented to the wrist
+              // would ride the arm through the whole next mode, invisible but
+              // still attached, and the scrub's own sponge swap would then be
+              // fighting a passenger.
+              feedDrop();
+              if (bowlTween) { bowlTween.kill(); bowlTween = null; }
               if (bowl) bowl.visible = false;
               if (glass) glass.visible = false;
               // Switching away MID-BEAT must stop the care count too, or the
@@ -1951,27 +2006,136 @@ function swapIn(obj) {
   });
 }
 
-/** Carry the bowl from the tray to the mouth, then hold it there.
+/** Push the travel fraction at the feeding arm, once per frame.
  *
- *  gsap is already vendored and drives every other motion on this page, so
- *  this uses it rather than adding a second animation system. If gsap failed
- *  to load the bowl simply appears at the mouth, which is worse-looking and
- *  still legible -- the same degradation the counter already takes.
+ *  Called from the render loop rather than set once, because feedPose reads
+ *  the number when it is called: a gsap tween mutating feedCarry.t would
+ *  otherwise never be seen by the arm.
  */
+function stepFeedCarry() {
+  if (!feedReaching) return;
+  fleet[1]?.arm.feedPose(feedCarry.t);
+}
+
+/** Put the prop back on the tray and hand the arm back to its pose targets.
+ *  Shared by the estop, the mode exit and the end of each mouthful. */
+function feedDrop(park = true) {
+  const arm = fleet[1]?.arm;
+  // RELEASED WHERE IT IS. arm.release() uses Object3D.attach, so the prop does
+  // not jump at the moment it leaves the claw -- it stays at the mouth, which
+  // is where the claw let go of it.
+  if (feedHeld && arm) arm.release(feedHeld, scene);
+  // PUTTING IT BACK ON THE TRAY IS A SEPARATE DECISION, and the mid-beat
+  // release does not make it. A prop that snapped to the tray the instant the
+  // claw opened would be teleporting again, one layer down from where this
+  // change removed the teleport.
+  if (feedHeld && park) feedHeld.position.copy(feedTray);
+  feedHeld = null;
+  if (park) feedReaching = false;
+}
+
+/** ONE MOUTHFUL: travel to the tray, close on the prop, carry it to the
+ *  mouth, let go. The prop has NO tween of its own at any point -- from the
+ *  grab to the release it is a child of the wrist, so it arrives only because
+ *  the arm did.
+ *
+ *  This replaces a 1.5s tween that slid the bowl from a typed tray position
+ *  to a typed mouth position while the arm played its own animation beside
+ *  it. The two read as one action and were not one: the bowl made the
+ *  identical trip whether the arm moved or not, which is the kind of claim
+ *  docs/HOW-IT-WORKS.md section 4 forbids the screen from making.
+ *
+ *  gsap drives ONE NUMBER, the travel fraction, and the arm turns that into a
+ *  pose. With no gsap the fraction is set straight to each end and the arm's
+ *  own springs still carry it there -- less eased to read, still the arm
+ *  doing the carrying.
+ */
+/** SEND THE ARM TO THE TRAY AND PUT THE PROP ON IT. Called once when feed
+ *  opens, before the first mouthful.
+ *
+ *  It exists because the arm's springs are heavily damped -- measured, they
+ *  take over three seconds to close on a new pose, while a mouthful is 1.6 to
+ *  2.2 -- so an arm asked to fetch from the tray inside one mouthful never
+ *  gets there and the grab is honestly refused every time. Travelling to the
+ *  tray ONCE, during the 400ms the mode already spends opening, means the claw
+ *  is on the bowl by the time the first spoonful is called for, and every
+ *  mouthful after it is a carry out and a carry back.
+ *
+ *  The prop is placed at feedPoseWorld(0), which is where the claw WILL be.
+ *  That is the whole difference from the constant this replaces: the tray is
+ *  defined by the arm's reach rather than by a number sitting beside it.
+ */
+function feedBegin(prop) {
+  const obj = prop || bowl;
+  const arm = fleet[1]?.arm;
+  if (!obj || !arm) return;
+  if (bowlTween) { bowlTween.kill(); bowlTween = null; }
+  feedDrop();
+  arm.feedPoseWorld(0, feedTray);
+  obj.position.copy(feedTray);
+  feedCarry.t = 0;
+  feedReaching = true;
+}
+
 function liftBowl(prop) {
   const obj = prop || bowl;
-  if (!obj) return;
+  const arm = fleet[1]?.arm;
+  if (!obj || !arm) return;
   if (bowlTween) bowlTween.kill();
-  obj.position.set(BOWL_REST.x, BOWL_REST.y, BOWL_REST.z);
-  if (!window.gsap) { obj.position.set(BOWL_MOUTH.x, BOWL_MOUTH.y, BOWL_MOUTH.z); return; }
-  bowlTween = window.gsap.to(obj.position, {
-    x: BOWL_MOUTH.x, y: BOWL_MOUTH.y, z: BOWL_MOUTH.z,
-    duration: 1.5,
-    // Slow out of the tray, slow into the face. A linear carry reads as a
-    // machine moving an object; an eased one reads as being careful with it,
-    // which is the whole point of the beat.
-    ease: 'power2.inOut',
-  });
+
+  const grab = () => {
+    // THE PROP CANNOT ARRIVE IF THE ARM DID NOT. The grab reads where the claw
+    // actually is and refuses when it is not on the prop, so an arm that
+    // failed to travel leaves the bowl on the tray and the screen shows an arm
+    // that tried rather than a bowl that teleported.
+    const tool = arm.toolWorld(new THREE.Vector3());
+    // 0.12 of page units against the arm's own 1.42 reach, under a tenth of
+    // it: the claw has to be ON the prop, not near it. That is affordable
+    // because the tray pose was chosen to be one the arm closes on quickly --
+    // measured at 0.005 of error after 1.2 seconds from rest -- so a real
+    // arrival clears this easily and a failure to travel does not.
+    if (tool.distanceTo(feedTray) > 0.12) return;
+    arm.grip(obj);
+    feedHeld = obj;
+  };
+
+  // LET GO AT THE MOUTH, WITHOUT PARKING. The prop stays where the claw left
+  // it -- a bowl set down in front of the person -- and the arm travels back
+  // to the tray empty, which is what feeding someone actually looks like: the
+  // spoon goes back for more. Parking here would be a teleport one layer down
+  // from the one this change removed.
+  const drop = () => { feedDrop(false); feedReaching = true; };
+  // AND THE PROP GOES BACK WHEN THE CLAW IS BACK, not before. By now the arm
+  // has travelled home, so moving the bowl onto the tray puts it under a claw
+  // that is already there rather than sliding it across the room.
+  const restock = () => { if (!feedHeld) obj.position.copy(feedTray); };
+
+  if (!window.gsap) {
+    // NO ANIMATION LIBRARY, SAME MECHANISM. The travel fraction is set
+    // straight to each end and the arm's springs interpolate between them, so
+    // the bowl is still carried rather than moved.
+    grab();
+    feedCarry.t = 1;
+    modeTimers.push(setTimeout(() => { drop(); feedCarry.t = 0; }, 900));
+    modeTimers.push(setTimeout(restock, 1800));
+    return;
+  }
+
+  // CLOSE, CARRY IN, HOLD AT THE MOUTH, LET GO, CARRY BACK. Eased at both
+  // ends of each leg, because a linear carry reads as a machine moving an
+  // object and an eased one reads as being careful with it, which is the
+  // whole point of the beat.
+  bowlTween = window.gsap.timeline()
+    .call(grab)
+    .to(feedCarry, { t: 1, duration: 0.70, ease: 'power2.inOut' })
+    // THE HOLD IS LONGER THAN THE TWEEN NEEDS, on purpose. The springs lag the
+    // pose they are given -- that lag is what makes the arm read as a machine
+    // with mass rather than a diagram -- so the claw is still arriving when
+    // the tween says 1. Letting go on the tween's last frame would drop the
+    // bowl half a unit short of the face.
+    .call(drop, null, '+=0.55')
+    .to(feedCarry, { t: 0, duration: 0.45, ease: 'power2.inOut' })
+    .call(restock, null, '+=0.35');
 }
 
 function setMode(next) {
@@ -2961,6 +3125,11 @@ function stopScrubChoreography() {
   if (modeTick !== null) { clearTimeout(modeTick); modeTick = null; }
   // The props go down with the arms. A bowl left floating at a stopped
   // person's mouth is the same lie in a different form.
+  // OUT OF THE CLAW FIRST, and the carry tween killed with it: a stop that
+  // leaves the prop parented to the wrist has the arm still carrying it
+  // while the HUD says everything stopped.
+  if (bowlTween) { bowlTween.kill(); bowlTween = null; }
+  feedDrop();
   if (bowl) bowl.visible = false;
   if (glass) glass.visible = false;
   fleetPhase('rest');
@@ -4245,6 +4414,13 @@ window.__wheelgentic = { scene, camera, avatar, recs, renderer,
                      // reports only happen on a real venue network, which is
                      // exactly where nobody can run a test.
                      fleet,
+                     // THE CARRIED PROPS, so a check can read whether the
+                     // bowl is a child of the arm or a child of the scene.
+                     // That parentage IS the feature: a bowl on the scene is
+                     // a bowl being tweened beside an arm, and no screenshot
+                     // can tell the two apart from one frame.
+                     get bowl() { return bowl; },
+                     get glass() { return glass; },
                      get voice() { return voice; },
                      get voiceFault() { return voiceFault; },
                      // read-only view of the live-cycle flag, so a test can
