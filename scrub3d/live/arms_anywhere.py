@@ -184,6 +184,18 @@ def main():
     if a.only:
         jobs = [j for j in jobs if j[0] == a.only or (a.only == "random"
                                                       and j[0].startswith("random"))]
+    # CHECK THE RECORDING BEFORE THE POOL, NOT INSIDE IT. _init opens it in
+    # each worker, and a SystemExit raised in a ProcessPoolExecutor
+    # INITIALIZER kills that worker before its message can travel back: the
+    # parent sees only BrokenProcessPool, which names neither the folder nor
+    # the reason. Replaying a missing recording therefore reported a pool
+    # failure rather than "there is no recording", on the one tool most likely
+    # to be run first. replay_source explains it properly; reach it from the
+    # parent process where its message survives.
+    if not os.path.isdir(a.recording):
+        sys.path.insert(0, HERE)
+        import live_body as LB
+        LB.replay_source(a.recording)        # raises SystemExit with the why
     t0 = time.time()
     print(f"{len(jobs)} rigs, {a.jobs} at a time", flush=True)
     reports = []

@@ -18,10 +18,12 @@ only code that imports dimOS. `arm_dimos.py` looks exactly like
 
 ## Run it
 
-On the Spark, mock arms first (dimOS simulates them; nothing moves):
+On the Spark, mock arms first (dimOS simulates them; nothing moves). `$WG`
+is wherever this checkout lives on that machine -- the commands below are
+run from its root:
 
 ```bash
-cd ~/thingy && ~/dimos/.venv/bin/python scrub3d/live/dimos_bridge_server.py
+cd $WG && ~/dimos/.venv/bin/python scrub3d/live/dimos_bridge_server.py
 ```
 
 Real arms, once `can0`/`can1` are up (`sudo ip link set can0 up type can bitrate 1000000`, both):

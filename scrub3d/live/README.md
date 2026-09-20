@@ -248,6 +248,29 @@ camera and can be off. So, on top (`arms_live.py`, THE DEPTH GUARD):
 
 `safety_check.py` is the test (below).
 
+## These five tools need a recording, and this checkout has none
+
+`rig_editor.py`, `rig_sim.py`, `search_rig.py`, `arms_anywhere.py` and
+`arms_check.py` all replay an RGB-D recording: a folder of `<name>_c.png` /
+`<name>_d.png` frames plus `intr.json`, written by
+`python scrub3d/live/live_body.py --dump`, which needs a depth camera.
+
+`HANDOFF.md` says one recording is kept in the repository on purpose. It is
+not: `.gitignore` line 28 excludes `scrub3d/data/live_rec_*/`, and the
+directory does not exist on either machine. So all five run, parse their
+arguments and then stop with an explanation rather than a stack trace. To use
+them, record first:
+
+```
+python scrub3d/live/live_body.py --dump rec --dump-delay 15   # ~25 s, depth camera
+python scrub3d/live/rig_editor.py                             # http://127.0.0.1:8078
+python scrub3d/live/rig_sim.py scrub3d/data/live_rec_<date>
+python scrub3d/live/arms_check.py scrub3d/data/live_rec_<date>
+```
+
+Depth works on the Linux box (`ssh wg`), not on the Mac, where UVCAssistant
+blocks it and the camera is colour only.
+
 ## The rig (`live_rig.json`)
 
 Mounts are stored relative to the seat point (x toward the camera, y the
