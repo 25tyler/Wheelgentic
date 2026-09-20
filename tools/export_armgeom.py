@@ -59,6 +59,95 @@ from scrub3d import kinematics as K      # noqa: E402
 PAGE_CHAIN_UNITS = 0.08 + 0.72 + 0.62
 
 
+def _openyam_radii(percentile=99.0):
+    """Capsule radii off the OpenYAM's own meshes. -> {"base","upper","fore"}
+
+    THE SAME ARITHMETIC armmesh.measured_radii() does, pointed at the other
+    arm: take each link's vertices in the pose where its axis is known, and
+    measure the perpendicular distance from that axis. A high percentile
+    rather than the maximum, so one mounting lug does not inflate the whole
+    link -- but HIGH, because this becomes a drawn width and the failure
+    direction is drawing an arm thinner than the metal.
+
+    Which mesh belongs to which segment comes from the URDF's own chain:
+    base and link1 sit on the base column, link2 spans shoulder to elbow,
+    and link3 onward is everything past the elbow including the wrist and
+    the gripper. That last grouping is deliberate -- kinematics_openyam
+    models elbow-to-tool as ONE rigid link at the home wrist pose, so the
+    drawn forearm has to cover the same span or the picture and the reach
+    envelope disagree about where the arm ends.
+    """
+    from scrub3d import armmesh_openyam as OY
+    tf = OY.link_transforms([0.0] * 6)
+    ms = OY.meshes()
+    groups = {
+        "base":  ("base", "link1"),
+        "upper": ("link2",),
+        "fore":  ("link3", "link4", "link5", "gripper"),
+    }
+    # Segment endpoints at the zero pose, from the same kinematics the reach
+    # envelope uses. Measuring against anything else would give a width that
+    # does not belong to the arm being drawn.
+    base, shoulder, elbow, tcp = K.link_points(0.0, 0.0, 0.0)
+    segs = {"base": (base, shoulder), "upper": (shoulder, elbow),
+            "fore": (elbow, tcp)}
+
+    out = {}
+    for cap, names in groups.items():
+        pts = []
+        for nm in names:
+            got = ms.get(nm)
+            if got is None:
+                continue
+            V = np.asarray(got[0], float)
+            T = tf.get(nm)
+            if T is not None:
+                V = (np.asarray(T)[:3, :3] @ V.T).T + np.asarray(T)[:3, 3]
+            pts.append(V)
+        if not pts:
+            continue
+        P = np.vstack(pts)
+        a, b = (np.asarray(v, float) for v in segs[cap])
+        d = b - a
+        L2 = float(d @ d)
+        if L2 < 1e-9:
+            continue
+        t = np.clip((P - a) @ d / L2, 0.0, 1.0)
+        perp = np.linalg.norm(P - (a + t[:, None] * d), axis=1)
+        r = float(np.percentile(perp, percentile))
+        if not np.isfinite(r):
+            raise RuntimeError(f"OpenYAM radius for {cap!r} is not finite")
+        out[cap] = r
+    return out
+
+
+def _openyam_eoat_radius(percentile=99.0):
+    """How wide the claw is, off its own meshes. -> float mm.
+
+    The gripper plus both finger tips, measured about the tool axis. Drawn
+    as one box, so the widest part is what matters.
+    """
+    from scrub3d import armmesh_openyam as OY
+    tf = OY.link_transforms([0.0] * 6)
+    ms = OY.meshes()
+    pts = []
+    for nm in ("gripper", "tip_left", "tip_right"):
+        got = ms.get(nm)
+        if got is None:
+            continue
+        V = np.asarray(got[0], float)
+        T = tf.get(nm)
+        if T is not None:
+            V = (np.asarray(T)[:3, :3] @ V.T).T + np.asarray(T)[:3, 3]
+        pts.append(V)
+    if not pts:
+        return 0.0
+    P = np.vstack(pts)
+    c = P.mean(0)
+    return float(np.percentile(np.linalg.norm(P[:, :2] - c[:2], axis=1),
+                               percentile))
+
+
 def geometry():
     """-> the dict written to web/assets/armgeom.json.
 
@@ -85,7 +174,26 @@ def geometry():
     # Capsule radii measured off the vendor's STL meshes against each capsule's
     # own axis -- the same call collide.py's radii were regenerated from. These
     # are HALF-widths of real metal, so a drawn box gets twice them.
-    radii = AM.measured_radii()
+    # THE RADII HAVE TO COME OFF THE ARM BEING DRAWN. armmesh.py loads the
+    # RoArm's STLs and deliberately goes EMPTY under SCRUB3D_ARM=openyam --
+    # everything that reads it (the depth guard, the camera check, the rig
+    # editor) reasons about RoArm links, so it refuses rather than hand them
+    # OpenYAM geometry. That refusal is correct and is why measured_radii()
+    # raises KeyError here under the flag.
+    #
+    # For a WIDTH TO DRAW WITH, though, the OpenYAM's own meshes are exactly
+    # right, and armmesh_openyam.py loads them. Measuring each link's points
+    # against its own axis is the same arithmetic armmesh does; it just has
+    # to be pointed at the right arm.
+    if getattr(AM, "OPENYAM", False):
+        radii = _openyam_radii()
+        # The claw, from the same meshes. armmesh's eoat_radius() reads the
+        # RoArm's gripper_link, which is not loaded under the flag for the
+        # same reason the link radii are not.
+        eoat_r = _openyam_eoat_radius()
+    else:
+        radii = AM.measured_radii()
+        eoat_r = AM.eoat_radius()
 
     return {
         "source": "scrub3d/kinematics.py + scrub3d/armmesh.py (roarm URDF/STL)",
@@ -98,7 +206,7 @@ def geometry():
             "r_base": round(float(radii["base"]), 2),
             "r_upper": round(float(radii["upper"]), 2),
             "r_fore": round(float(radii["fore"]), 2),
-            "r_eoat": round(float(AM.eoat_radius()), 2),
+            "r_eoat": round(float(eoat_r), 2),
             "reach_max": round(upper_mm + fore_mm, 2),
         },
         # Page units, ready to drop into robotarm.js's geometry calls. The
@@ -110,7 +218,7 @@ def geometry():
             "w_base": round(2.0 * radii["base"] / mm_per_unit, 4),
             "w_upper": round(2.0 * radii["upper"] / mm_per_unit, 4),
             "w_fore": round(2.0 * radii["fore"] / mm_per_unit, 4),
-            "d_eoat": round(2.0 * AM.eoat_radius() / mm_per_unit, 4),
+            "d_eoat": round(2.0 * eoat_r / mm_per_unit, 4),
         },
         # The joint limits the real machine has, in degrees, so the page can
         # refuse to draw a pose the metal cannot hold. py/arm.py checks NONE of

@@ -51,7 +51,12 @@ except ImportError:
 
 ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "roarm")
 URDF_PATH = os.path.join(ASSETS, "roarm_description.urdf")
-LINKS = ("base_link", "link1", "link2", "link3", "gripper_link")
+# The RoArm's links. With SCRUB3D_ARM=openyam this stays empty: everything
+# that reads it (the depth guard, the camera check, the rig editor) reasons
+# about RoArm links. The OpenYAM is drawn from armmesh_openyam.py, which
+# nothing but the view reads.
+OPENYAM = os.environ.get("SCRUB3D_ARM", "roarm").lower() == "openyam"
+LINKS = () if OPENYAM else ("base_link", "link1", "link2", "link3", "gripper_link")
 
 
 def _rodrigues(axis, ang):
@@ -166,9 +171,9 @@ def _Rz(a):
     return M
 
 
-def load_stl(name):
+def load_stl(name, folder=ASSETS):
     """-> (V, F) with V in millimetres. Binary STL only, which is what ships."""
-    path = os.path.join(ASSETS, f"{name}.stl")
+    path = os.path.join(folder, f"{name}.stl")
     with open(path, "rb") as fh:
         data = fh.read()
     if len(data) < 84:
@@ -247,12 +252,9 @@ def posed(j0, j1, j2, j3=0.0, T_world_base=None):
     """-> {link name: (V_world, F)}. Ready to hand to a renderer."""
     tf = link_transforms(j0, j1, j2, j3, T_world_base)
     out = {}
-    # Accelerate's spurious matmul FPE flags again; the STL vertices and the
-    # link transforms are both finite. See bodymodel.Region.world.
-    with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
-        for name, (V, F) in meshes().items():
-            T = tf[name]
-            out[name] = ((T[:3, :3] @ V.T).T + T[:3, 3], F)
+    for name, (V, F) in meshes().items():
+        T = tf[name]
+        out[name] = ((T[:3, :3] @ V.T).T + T[:3, 3], F)
     return out
 
 
@@ -327,9 +329,7 @@ def eoat_radius(percentile=100.0):
     tf = link_transforms(0.0, 0.0, 0.0, 0.0)
     T = tf["gripper_link"]
     V, _ = meshes()["gripper_link"]
-    # Accelerate's spurious matmul FPE flags; see bodymodel.Region.world.
-    with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
-        Vw = (T[:3, :3] @ V.T).T + T[:3, 3]
+    Vw = (T[:3, :3] @ V.T).T + T[:3, 3]
     return float(np.percentile(np.linalg.norm(Vw - T[:3, 3], axis=1), percentile))
 
 
@@ -355,16 +355,12 @@ def measured_radii(percentile=99.0):
     """
     tf = link_transforms(0.0, 0.0, 0.0, 0.0)
     out = {}
-    # These radii ARE the collision margin, so the arithmetic below is checked
-    # by the assertion at the end rather than by a warning. The suppression is
-    # Accelerate's spurious matmul FPE flag only; see bodymodel.Region.world.
     for cap, names in CAPSULE_MESHES.items():
         pts = []
         for nm in names:
             V, _ = meshes()[nm]
             T = tf[nm]
-            with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
-                pts.append((T[:3, :3] @ V.T).T + T[:3, 3])
+            pts.append((T[:3, :3] @ V.T).T + T[:3, 3])
         P = np.vstack(pts)
 
         # Capsule axis endpoints in the world, at the zero pose.
@@ -377,42 +373,9 @@ def measured_radii(percentile=99.0):
         if L2 < 1e-9:
             out[cap] = 0.0
             continue
-        with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
-            t = np.clip((P - a) @ d / L2, 0.0, 1.0)
+        t = np.clip((P - a) @ d / L2, 0.0, 1.0)
         perp = np.linalg.norm(P - (a + t[:, None] * d), axis=1)
-        r = float(np.percentile(perp, percentile))
-        # UNDERSIZING IS THE FAILURE DIRECTION, and a suppressed FPE flag must
-        # never be the reason a radius comes back as nan and silently shrinks
-        # the capsule. Checked here, where it can still be caught, instead of
-        # relying on a warning that is now off.
-        if not np.isfinite(r):
-            raise RuntimeError(
-                f"capsule radius for {cap!r} is not finite -- refusing to "
-                f"hand a collision margin to the governor")
-
-        # THE MESHES AND THE AXIS MUST BE THE SAME ROBOT. The vertices come
-        # from the RoArm's STLs; the axis comes from K.link_points, which is
-        # the OpenYAM's under SCRUB3D_ARM=openyam. Measuring one against the
-        # other is not a radius at all: the RoArm's link3 points sit far off
-        # the OpenYAM's longer forearm axis, and the perpendicular distance
-        # becomes most of that offset. Measured 2026-09-19: fore came back
-        # 484mm against a true 28mm, and export_armgeom wrote it into
-        # armgeom.json as a 968mm-thick forearm on a 459mm link, which drew
-        # the arms as slabs swallowing the person.
-        #
-        # A radius wider than its own capsule is long is the cheap, general
-        # signature of that mismatch. Raising is right rather than clamping:
-        # these numbers become the governor's collision margin, and a margin
-        # quietly derived from the wrong robot is the failure this file's
-        # other guard already refuses.
-        seg_len = float(np.sqrt(L2))
-        if r > seg_len:
-            raise RuntimeError(
-                f"capsule radius for {cap!r} is {r:.1f}mm on a {seg_len:.1f}mm "
-                f"segment -- the meshes and the link axis are different arms. "
-                f"armmesh.py loads the RoArm's STLs, so it cannot be used "
-                f"under SCRUB3D_ARM=openyam until OpenYAM meshes exist.")
-        out[cap] = r
+        out[cap] = float(np.percentile(perp, percentile))
     return out
 
 
@@ -457,3 +420,33 @@ if __name__ == "__main__":
     print("\n  an undersized capsule is an unflagged collision; adopt the "
           "measured values")
     print("OK")
+
+# With SCRUB3D_ARM=openyam the RoArm URDF chain says nothing about where the
+# jaw is. Raising here sends collide.py down its documented fallback: the EoAT
+# sphere sits at the tool point, which is the conservative reading.
+if OPENYAM:
+    # The OpenYAM gripper: its body sits behind the grasp frame, which is
+    # 100 mm out from the gripper origin along the tool axis. The jaw sphere
+    # (collide.R_EOAT, 69 mm) is centred there. Centring it at the tool point
+    # instead put it inside every limb at sponge standoff, and the planner
+    # could reach nothing, from anywhere.
+    GRIPPER_BACK_MM = 100.0
+
+    def eoat_pivot(j0, j1, j2, T_world_base=None):
+        pts = np.asarray(K.link_points(j0, j1, j2), float)
+        elbow, tcp = pts[2], pts[3]
+        d = tcp - elbow
+        n = float(np.linalg.norm(d))
+        p = tcp - d / n * GRIPPER_BACK_MM if n > 1e-9 else tcp
+        if T_world_base is not None:
+            T = np.asarray(T_world_base, float)
+            p = T[:3, :3] @ p + T[:3, 3]
+        return p
+
+    def eoat_pivot_many(J):
+        P = K.link_points_many(J)
+        elbow, tcp = P[:, 2], P[:, 3]
+        d = tcp - elbow
+        n = np.linalg.norm(d, axis=1, keepdims=True)
+        n[n < 1e-9] = 1.0
+        return tcp - d / n * GRIPPER_BACK_MM

@@ -1,10 +1,10 @@
 {
-  "name": "plank across the armrests, measured; the bases face each other",
+  "name": "plank across the armrests; left as it touched, right between in-front and too-far-behind",
   "frame": "x and y from the seat point, z above the floor. a0 is the arm on --left-can-port (the person's left), a1 the one on --right-can-port. Made by openyam_rig.py from a tape measure; edit the numbers there, not here.",
   "measured": {
-    "span_mm": 850.0,
-    "height_mm": 550.0,
-    "ahead_mm": 200.0,
+    "left": "285, 400: measured from the depth image with the first sitter; with the second sitter the sponge TOUCHED at this, so it stays",
+    "right": "335: at 235 the sponge came down in front of the second sitter's arm, at 438 too far behind it; halfway. y as first measured",
+    "tune_it": "SCRUB3D_LEFT_BACK_MM / SCRUB3D_RIGHT_BACK_MM on the command line move a sponge back (+) or forward (-) without touching this file",
     "facing_deg": -90.0,
     "facing_right_deg": 90.0
   },
@@ -12,22 +12,20 @@
     {
       "id": "a0",
       "side": "left",
-      "x_from_seat_mm": 200.0,
-      "y_from_seat_mm": 425.0,
-      "z_mm": 550.0,
+      "x_from_seat_mm": 285.0,
+      "y_from_seat_mm": 400.0,
+      "z_mm": 475.0,
       "facing_deg": -90.0,
-      "start_deg": 90.0,
-      "can": "can0"
+      "start_deg": 90.0
     },
     {
       "id": "a1",
       "side": "right",
-      "x_from_seat_mm": 200.0,
-      "y_from_seat_mm": -425.0,
-      "z_mm": 550.0,
+      "x_from_seat_mm": 335.0,
+      "y_from_seat_mm": -430.0,
+      "z_mm": 475.0,
       "facing_deg": 90.0,
-      "start_deg": -90.0,
-      "can": "can1"
+      "start_deg": -90.0
     }
   ],
   "phases": [
@@ -35,6 +33,5 @@
       0,
       1
     ]
-  ],
-  "can_assignment_source": "dimos_bridge_server.py running on the GB10 as --left-can-port can0 --right-can-port can1, read off the live process 2026-09-19. Recorded because nothing else wrote it down: if these are ever swapped, the left arm moves when the screen says right."
+  ]
 }

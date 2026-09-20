@@ -277,6 +277,63 @@ def _sample_body():
         return None
 
 
+# HOW SURE A DIMENSION HAS TO BE BEFORE IT IS ALLOWED TO SHAPE THE BODY.
+#
+# scene_out reports confidence as n/(n+40) -- live_body's own prior weight --
+# so 0.5 is forty frames of depth agreeing about that one number, the point
+# where the running median outweighs the population table that seeded it.
+# Below that the value is still MOSTLY the prior, and passing it to the solver
+# would be handing anatomy.ADULT back to the function that already holds it
+# while calling the result a measurement.
+#
+# MEASURED on scrub3d/data/live_rec_sample (a real D455 recording, 50 frames,
+# replayed): biacromial, upper_arm_len and forearm_len all reach 0.882, and
+# the six circumference dimensions sit at exactly 0.0 because nothing samples
+# a width off 3D joints. So this threshold's real job on today's data is to
+# keep those six zeros out, and any value between about 0.05 and 0.85 picks
+# the same three winners.
+_MEASURE_MIN_CONF = 0.5
+
+
+def measured_kwargs(body):
+    """A wire `body` block -> the measurements anatomical_body should take.
+
+    -> ({model_key: mm}, [names kept]). Empty dict when nothing qualifies.
+
+    ONLY THE DIMENSIONS THAT WERE ACTUALLY MEASURED SURVIVE, and that is the
+    whole function. `mm` carries a value for every key whether or not anyone
+    measured it -- scene_out says so in its own header: "a dimension with no
+    samples is reported as the prior WITH confidence 0.0". Copying the block
+    wholesale into the solver would therefore rebuild the body from six
+    population constants and three real numbers, and nothing downstream could
+    say which was which.
+
+    Dropping the unconfident ones is not a loss of information. anatomy's
+    `m = dict(ADULT); m.update(measurements)` leaves an absent key at exactly
+    the prior this would have passed, so the BODY IS IDENTICAL either way --
+    what changes is that the count of measured dimensions is now true, and the
+    page can say "3 of 9" instead of implying nine.
+
+    NEVER RAISES: it is read by a solve thread whose failure mode must be
+    "fell back to the population table", not a dead thread.
+    """
+    try:
+        if not body or body.get("src") != "depth":
+            return {}, []
+        mm = body.get("mm") or {}
+        conf = body.get("confidence") or {}
+        out = {}
+        for k, v in mm.items():
+            if v is None:
+                continue
+            if float(conf.get(k, 0.0)) < _MEASURE_MIN_CONF:
+                continue
+            out[k] = float(v)
+        return out, sorted(out)
+    except Exception:                                        # noqa: BLE001
+        return {}, []
+
+
 def _sample_joints(arm):
     """What the arms are doing, for the 15Hz wire. -> dict, or None.
 
@@ -1005,6 +1062,7 @@ def _solve_live():
     # BOUND BEFORE THE try, because the "ready" event below reads them and the
     # except path must not turn a solver failure into a NameError that hides it.
     measurements, why = {}, "not attempted"
+    dims = []
     try:
         # MEASURE FIRST, THEN SOLVE. This is the whole point of the live solve:
         # re-running the partition against the SAME population table it was
@@ -1018,15 +1076,53 @@ def _solve_live():
         # changes is that the operator is TOLD which one they got, and the
         # page is told too, so nothing on screen can claim a measurement that
         # did not happen.
-        measurements, why = _measure_person(cam_index=_MEASURE_CAM,
-                                            model_path=_MEASURE_MODEL)
+        #
+        # THE 15Hz WIRE IS THE BETTER MEASUREMENT AND IS TRIED FIRST. Both
+        # paths measure the same person off the same depth, and they are not
+        # equally good:
+        #
+        #   EVENT["body"]      300 frames of 3D joint distances, running
+        #                      median, per-dimension confidence. Free -- the
+        #                      vision loop already paid for it every frame.
+        #   _measure_person()  ONE best-of-40 frame's silhouette, widths
+        #                      scaled by config's assumed standoff_mm, with
+        #                      an x0.92 "skin to bone" factor on biacromial.
+        #                      Opens a second capture and costs ~1s.
+        #
+        # MEASURED against scrub3d/data/live_rec_sample, same person, same
+        # recording: the wire says shoulders 340.3mm / upper arm 245.6 /
+        # forearm 235.3, and _measure_person says 282.6 / 213.2 / 194.2. A
+        # 58mm disagreement about a shoulder. The wire's number has three
+        # hundred frames and a median behind it; the other has one frame and
+        # an assumed distance, so when the wire has a confident dimension it
+        # wins.
+        #
+        # _measure_person STAYS as the fallback and is not dead code: it is
+        # the only path that measures CIRCUMFERENCES, which need a silhouette
+        # and which 3D joints cannot give at all. It is also what runs on a
+        # machine where the body accumulators never filled.
+        _wire = _sample_body()
+        measurements, dims = measured_kwargs(_wire)
         if measurements:
-            print(f"[solve] measured this person: {why}")
+            n = int((_wire or {}).get("n_frames", 0))
+            why = f"{len(dims)} dimension(s) from {n} frames of depth"
+            print(f"[solve] measured this person: {why} — {', '.join(dims)}")
         else:
-            print(f"[solve] not measured ({why}) — using the population table")
+            measurements, why = _measure_person(cam_index=_MEASURE_CAM,
+                                                model_path=_MEASURE_MODEL)
+            dims = sorted(measurements)
+            if measurements:
+                print(f"[solve] measured this person: {why}")
+            else:
+                print(f"[solve] not measured ({why}) — using the population "
+                      f"table")
         with LOCK:
+            # n_dims RIDES ALONG so the projector can say HOW MUCH of the body
+            # was measured rather than just that something was. Three of nine
+            # dimensions measured is a real result and "MEASURED" alone
+            # overstates it -- see web/main.js's body banner for the wording.
             EVENT["solve"] = {"state": "running", "measured": bool(measurements),
-                              "why": why[:120]}
+                              "n_dims": len(dims), "why": why[:120]}
         # IMPORTED HERE, NOT AT MODULE LEVEL. export_body imports numpy and the
         # whole scrub3d package at import time and exits the process outright
         # if scrub3d is missing. scrubbot must start on a machine that has
@@ -1058,9 +1154,17 @@ def _solve_live():
             # it is drawing. A projector that reads "measured body" over a
             # population table is the defect this whole change exists to fix;
             # shipping the flag beside the file is what stops it coming back.
+            #
+            # n_dims IS THE SECOND HALF OF THE SAME HONESTY. "measured" is a
+            # yes/no and today the true answer is "partly": three of the nine
+            # dimensions anatomical_body takes came off depth and the other
+            # six are still anatomy.ADULT. A page told only `measured: true`
+            # has no way to say so and will round up to MEASURED, which is
+            # the generic-body-wearing-a-measured-label failure again.
             EVENT["solve"] = {"state": "ready", "file": "body-live.json",
                               "secs": round(dt, 1),
-                              "measured": bool(measurements), "why": why[:120]}
+                              "measured": bool(measurements),
+                              "n_dims": len(dims), "why": why[:120]}
     except BaseException as e:
         # BaseException, not Exception: export_body calls sys.exit() when
         # scrub3d is absent, which raises SystemExit -- and SystemExit in a
