@@ -613,6 +613,56 @@ let armJointsSrc = null;
 let limbsSrc = null;
 let limbsSeen = 0;
 
+// The measured joints themselves, world millimetres, or null when this frame
+// had none. Set only when EVERY reported joint was depth-measured; see the
+// socket handler for why a partial set is not used.
+let limbsWorld = null;
+
+/** Measured world joints -> the landmark array avatar.update() poses from.
+ *
+ *  THE TWO FRAMES ARE NOT THE SAME AND THE DIFFERENCE IS NOT COSMETIC.
+ *  py/vision.py publishes millimetres in scrub3d's world: +x the way the
+ *  person faces, +y their left, +z up, origin on the floor under them.
+ *  avatar.js wants MediaPipe's convention: metres, +y DOWN, hip-centred,
+ *  and it negates y and z itself on the way in.
+ *
+ *  So this inverts vision.py's own _MP_TO_S3D:
+ *      s3d.x =  mp.z      ->  mp.x =  s3d.y
+ *      s3d.y =  mp.x      ->  mp.y = -s3d.z
+ *      s3d.z = -mp.y      ->  mp.z =  s3d.x
+ *  and subtracts the mid-shoulder so the result is centred the way
+ *  MediaPipe's world landmarks are. Getting a sign wrong here is invisible
+ *  in code and obvious on screen: the cartoon faces backwards, or leans the
+ *  wrong way, with no error anywhere.
+ *
+ *  Returns null unless BOTH shoulders are present, because the centring
+ *  needs them and a skeleton centred on one shoulder swings the whole body.
+ */
+function limbsToLandmarks(mm) {
+  const need = ['l_shoulder', 'r_shoulder'];
+  if (!mm || need.some(k => !Array.isArray(mm[k]))) return null;
+  const cx = (mm.l_shoulder[0] + mm.r_shoulder[0]) / 2;
+  const cy = (mm.l_shoulder[1] + mm.r_shoulder[1]) / 2;
+  const cz = (mm.l_shoulder[2] + mm.r_shoulder[2]) / 2;
+  // MediaPipe's own indices, the ones avatar.js's LM table names.
+  const IDX = { l_shoulder: 11, r_shoulder: 12, l_elbow: 13, r_elbow: 14,
+                l_wrist: 15, r_wrist: 16 };
+  const out = [];
+  for (const [name, i] of Object.entries(IDX)) {
+    const p = mm[name];
+    if (!Array.isArray(p)) continue;
+    const sx = p[0] - cx, sy = p[1] - cy, sz = p[2] - cz;
+    // mm -> metres, and into MediaPipe's axes.
+    out[i] = { x: sy / 1000, y: -sz / 1000, z: sx / 1000 };
+  }
+  // avatar.update() indexes up to LM.R_HIP (24) before it will pose
+  // anything, so the array has to be that long even though the hips are not
+  // published. The holes are undefined, and aim() already skips a joint it
+  // cannot read -- the arms pose, the legs keep their idle.
+  out.length = Math.max(out.length, 25);
+  return out;
+}
+
 // HOW MUCH OF THE DRAWN BODY WAS ACTUALLY MEASURED.
 //
 // `bodyMeasuredDims` counts only the dimensions whose confidence cleared the
@@ -3145,7 +3195,25 @@ function startScrubChoreography() {
         limbsSrc = src;
         limbsSeen = n;
       }
+      // POSE THE CARTOON FROM THE MEASURED JOINTS, when they were measured.
+      //
+      // This used to only COUNT them, and the comment said why: the cartoon
+      // was already mirroring a person off this machine's own webcam, and a
+      // second slower source feeding the same bones would fight it fifteen
+      // times a second. That reasoning held while these points were
+      // MediaPipe's generic-human estimate -- two guesses fighting is worse
+      // than one.
+      //
+      // It stops holding once they are measured. A depth-backed joint is
+      // where the person's elbow IS, in millimetres, and the webcam's is a
+      // guess scaled to an average body. When the wire says every joint was
+      // measured, that is the better source and it wins outright; when it
+      // says "mixed" or "pose_2d_lifted" we leave the webcam alone, because
+      // a half-measured skeleton is not an improvement on a whole estimated
+      // one.
+      limbsWorld = (src === 'depth_measured') ? m.limbs.mm : null;
     } else if (limbsSrc !== null) {
+      limbsWorld = null;
       // Absent means the detector found nobody. Clear, for the same reason
       // scrubbot publishes this field non-sticky: a held-over pose is a
       // person standing where they are not.
@@ -3498,11 +3566,30 @@ renderer.setAnimationLoop(() => {
       // the cartoon mirror the volunteer. A freeze with no explanation reads
       // as the tracking being broken; naming it reads as the system knowing
       // what it is doing.
+      // THE MEASURED SKELETON WINS OVER THIS MACHINE'S WEBCAM. `lm` is
+      // MediaPipe's world landmarks from the camera attached here: real
+      // direction, but a distance scaled to an average body. `limbsWorld`
+      // is millimetres measured by the depth camera watching the person in
+      // the actual chair. When the second exists it is simply the better
+      // answer to the same question, and mixing them would produce a
+      // skeleton that is neither.
+      //
+      // subjectSeen stays tied to the LOCAL detector on purpose: it drives
+      // the "nobody in frame" line about the camera pointed at this room,
+      // and a person measured on the other machine does not make somebody
+      // appear in front of this one.
+      const measuredLm = limbsWorld ? limbsToLandmarks(limbsWorld) : null;
       subjectSeen = !!lm;
-      avatar.update(lm, dt, t);
+      avatar.update(measuredLm || lm, dt, t);
       stepArms(dt);
     } else {
-      avatar.update(null, dt, t);
+      // NO LOCAL CAMERA, BUT POSSIBLY A MEASURED PERSON. This branch runs
+      // when this machine has no webcam or was denied one -- which is the
+      // normal case for a projector fed by the arm computer. The measured
+      // skeleton is not affected by any of that, so it still poses the
+      // cartoon; null here would idle a character the depth camera can see
+      // perfectly well.
+      avatar.update(limbsWorld ? limbsToLandmarks(limbsWorld) : null, dt, t);
       stepArms(dt);
     }
     // THE SCAN FOLLOWS THE PERSON. The brainstorm's stated innovation is that
