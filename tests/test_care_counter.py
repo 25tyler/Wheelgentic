@@ -69,18 +69,32 @@ async def main():
             return await pg.evaluate(
                 "document.getElementById('care')?.innerText || ''")
 
-        print("\n=== 1. THE COUNT STOPS WHEN THE FEEDING BEAT LANDS ===")
+        print("\n=== 1. THE COUNT STOPS WHEN THE FEEDING BEAT ENDS ===")
+        # WHAT ENDS THE BEAT CHANGED on 2026-09-20. It used to end on a typed
+        # total -- four spoonfuls, three sips, two pills -- and this section
+        # waited for the fourth to land and then checked the clock had
+        # stopped. Nothing measures how much food is in a bowl, so the total
+        # was removed along with the bowl itself, and feeding now runs until
+        # the operator ends it.
+        #
+        # The rule being tested is unchanged and is the point of the file: the
+        # count must measure care DELIVERED, not the mode being selected. So
+        # the beat is ended here the way an operator ends it, and the clock
+        # must stop with it.
         await pg.keyboard.press("8")
-        await pg.wait_for_timeout(13000)    # all four spoonfuls land
+        await pg.wait_for_timeout(15000)    # long enough for real arm trips
         landed = secs(await read())
         check("feeding counted while it was delivering",
               landed is not None and landed > 0, landed)
+        await pg.keyboard.press("x")        # the operator stops it
+        await pg.wait_for_timeout(1000)
+        stopped = secs(await read())
         await pg.wait_for_timeout(6000)     # still in feed mode, arms at rest
         idle = secs(await read())
         # The whole defect: `mode` is still 'feed' for all six of these
         # seconds, and nothing on screen is moving.
-        check("and stops once the last spoonful has landed",
-              landed == idle, f"{landed}s then {idle}s six seconds later")
+        check("and stops once the beat is over",
+              stopped == idle, f"{stopped}s then {idle}s six seconds later")
 
         print("\n=== 2. VITALS COUNTS FOR AS LONG AS IT IS UP ===")
         await pg.keyboard.press("9")

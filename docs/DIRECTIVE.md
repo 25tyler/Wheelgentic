@@ -194,7 +194,7 @@ with the bug deliberately planted, because it printed instead of asserting.
 
 ## 2. CURRENT STATE
 
-**ALL 37 PHASE ITEMS ✅. Full suite 41 tests. ~747 assertions**
+**ALL 37 PHASE ITEMS ✅. Full suite 40 tests. ~772 assertions**
 (counted as LINES containing `check(`, which is what the guard in
 `test_docs_match_code.py` measures — call-sites read 495 and labelled
 `check("` reads 433; three metrics, three numbers, all consistent. They differ

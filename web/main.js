@@ -142,22 +142,6 @@ const SEAT_Z      = -0.06;
 const BODY_X = -2.45;
 const BODY_Z =  0.55;
 
-// Where the bowl waits and where it ends up. REST is ON THE SECOND ARM'S OWN
-// MOUNTING PLATE -- there is no separate tray mesh, and this used to say
-// "on the tray beside the second arm", which sent me looking for one. The
-// plate is wide enough that the bowl reads as resting on a surface rather
-// than floating; checked on a projector-sized frame at the moment feed opens.
-// MOUTH is in front of the seated character's face, solved off the head
-// bone's measured world position (1.481) rather than guessed.
-// WHERE THE PROPS PARK AT BOOT, and nothing else. It used to be half of a
-// pair with a BOWL_MOUTH constant, and a 1.5s tween carried the bowl between
-// the two -- which meant the bowl made the same trip whether the arm moved or
-// not. The carry is the arm's now (see liftBowl), so the mouth constant is
-// gone and the tray is measured per mouthful from where the claw lands.
-//
-// This one stays because the props are loaded long before the fleet exists,
-// and a bowl has to sit somewhere until an arm can be asked where its tray is.
-const BOWL_REST  = { x: -1.05, y: 0.70, z: 0.35 };
 const SEAT_SURFACE_Y = FLOOR_Y + CHAIR_H * CHAIR_SCALE * SEAT_FRAC;
 const SEATED_ROOT_Y  = SEAT_SURFACE_Y - THIGH_OFF;
 
@@ -833,15 +817,11 @@ let voiceFault = null;
 
 // THE BOWL. Loaded once with the chair, hidden until feeding mode. Kept at
 // module scope so setMode can reach it without threading it through.
-let bowl = null;
 // The pulse sensor on the chair's armrest and its reading light. The
 // light pulses on the ECG's own cardiac phase, so the glow and the
 // spike cannot drift apart.
 let sensorPad = null;
 let sensorLed = null;
-let spoon = null;
-let bowlTween = null;
-let glass = null;
 // ---- THE FEED CARRY'S STATE. Up here with the other prop state rather than
 // beside liftBowl, because stepFeedCarry() runs from the render loop and a
 // `const` further down the module is in its temporal dead zone until the
@@ -862,9 +842,6 @@ const feedTray = new THREE.Vector3();
 // on release and on leaving the mode, because a reach left standing overrides
 // setPhase('rest') forever and the arm would never park.
 let feedReaching = false;
-// The prop currently in the claw, so an estop or a mode change can put it
-// back rather than leaving it parented to an arm that has folded away.
-let feedHeld = null;
 // Set by the voice intent for pills, read by the feed mode on the very next
 // tick. A flag rather than a second mode, because to the machine it IS the
 // same job -- lift something to the person's mouth -- and only the payload
@@ -1000,7 +977,7 @@ function stepArms(dt) {
   // BEFORE arm.update, so the reach point this frame is the one the solve
   // reads. After it, the arm would be a frame behind the prop it is carrying.
   stepFeedCarry();
-  if (fleet.length) { fleet.forEach(({ arm }) => arm.update(dt)); return; }
+  if (fleet.length) { fleet.forEach(({ arm }) => arm.update(dt)); stepFeedWait(); return; }
   robot?.update(dt);        // before the fleet is built
 }
 
@@ -1134,61 +1111,16 @@ const MODES = {
             // on someone's face reads as an attack; one arm offering food
             // reads as care, which is the difference the pitch depends on.
             //
-            // AND IT CARRIES SOMETHING. An empty arm waving near a face is
-            // not legible as feeding; a bowl travelling from the tray to the
-            // mouth is legible instantly, with no narration. The bowl is
-            // Kenney's Food Kit (CC0), the same artist as the character and
-            // the chair, so nothing here is modelled.
             enter: () => {
               fleetPhase('rest', 0);
-              // WHICH PROP depends on what was asked for. `pills` is set by
-              // the voice intent just before the mode switch, so saying "I
-              // need my pills" brings the glass and saying "I'm hungry"
-              // brings the bowl. Without this the voice claimed one thing
-              // while the screen showed another.
-              // THE ARM CHANGES TOOLS. The brainstorm asks for it by name
-              // ("Magnet to change tools?") and without it the feeding arm
-              // carries soup to a mouth while still wearing the sponge it
-              // scrubs with -- one machine pretending to be five.
+              // NO PROP, AND NO TOOL SWAP. The feed beat used to bring a
+              // soup bowl, a glass and a spoon, and the meds beat a glass of
+              // pills. All of it is gone: the only thing on this arm that a
+              // viewer ever sees is the sponge it scrubs with.
               //
-              // Hidden, not removed: robotarm.js exposes the sponge and the
-              // tests read its WORLD POSITION to check it meets the dirt, so
-              // the mesh has to stay exactly where it is.
-              const feeder = fleet[1] && fleet[1].arm;
-              // AN EXCHANGE, NOT A TELEPORT. Both props hang off the same
-              // attach point, so flipping .visible on each swapped them in a
-              // single frame -- the presenter says "it puts the sponge down
-              // and picks up a spoon" while the screen shows one object
-              // becoming another. Shrinking one away and growing the other in
-              // over a quarter second costs no geometry and makes the spoken
-              // line a shown one.
-              //
-              // SCALE IS A MULTIPLIER OFF EACH PROP'S OWN AUTHORED VALUE,
-              // never a fixed number: the spoon's 0.55 and the sponge's 1.0
-              // were each measured against the character and a tween that
-              // ended on a literal would silently resize them.
-              if (feeder && feeder.sponge) swapOut(feeder.sponge);
-              // THE SPOON IS FOR SOUP, NOT FOR PILLS. Showing it
-              // unconditionally put a spoon AND a glass of water in the same
-              // hand on the medication beat. The point of a tool change is
-              // that the tool matches the job.
-              // No spoon for a drink either -- you do not spoon a glass.
-              if (spoon) {
-                if (pillsRequested || drinkRequested) swapOut(spoon);
-                else swapIn(spoon);
-              }
-              // HIDE THE ONE WE ARE NOT USING. enter() only ever showed the
-              // chosen prop, and setMode skips leave() when the mode has not
-              // changed -- which is exactly what `shift+8` from inside feed
-              // does. So the soup bowl stayed parked at the mouth while the
-              // glass tweened into the same spot: two props interpenetrating
-              // at the volunteer's face, under the word MEDICATION, at the
-              // closest camera angle in the demo.
-              const useGlass = pillsRequested || drinkRequested;
-              const prop  = useGlass ? glass : bowl;
-              const other = useGlass ? bowl : glass;
-              if (other) other.visible = false;
-              if (prop) prop.visible = true;
+              // What is left is the arm itself reaching to the person's face
+              // and coming back, which is the part that was ever real. The
+              // count below measures those trips.
               const label = document.getElementById('label');
               if (label) label.textContent = pillsRequested ? 'MEDICATION'
                                           : drinkRequested ? 'DRINKING' : 'FEEDING';
@@ -1201,22 +1133,26 @@ const MODES = {
               // eaten in mouthfuls and a dose is a number of pills, so the
               // number is a real thing a carer would track.
               borrowPct(true);
-              // FOUR, NOT SIX. The script gives ten seconds to feed, pills
-              // and vitals together; six spoonfuls at 1.9s is 11.4s and eats
-              // the whole beat on its own, so the presenter runs out of line
-              // before the machine runs out of soup. Measured against
-              // DEMO-SCRIPT-V2's 1:42-1:52.
-              // THREE THINGS THE TILE PROMISES: eating, drinking, pills.
-              // `drinkRequested` is the one that was missing -- saying "I'm
-              // thirsty" routed to the food branch and brought a bowl of soup
-              // while the chair said "Bringing your food".
+              // NO TOTAL. This used to read `2 : 3 : 4` -- two pills, three
+              // sips, four spoonfuls -- and the bar filled towards it. Every
+              // one of those was typed. Nothing counts the pills in a real
+              // dispenser, nothing knows how much is in the glass, and an arm
+              // fed by a person's appetite has no number of spoonfuls in it.
+              // A bar at 50% claimed the machine knew it was halfway through
+              // a dose it had never been told the size of.
               //
-              // Sips are fewer and slower than spoonfuls, which is how a
-              // person actually drinks and also keeps the beat inside its ten
-              // seconds.
-              const total = pillsRequested ? 2 : drinkRequested ? 3 : 4;
-              const word  = pillsRequested ? 'PILLS'
-                          : drinkRequested ? 'SIPS' : 'SPOONS';
+              // So the readout reports what HAPPENED and stops: "3 SPOONS
+              // GIVEN". It only ever goes up, it is only ever a count of
+              // arrivals, and it never implies an end it cannot see. THREE
+              // THINGS THE TILE PROMISES -- eating, drinking, pills -- so the
+              // noun still changes with what was asked for.
+              // ONE OF THEM READS AS ENGLISH. "1 SIPS GIVEN" is what a
+              // counter with a typed total never had to deal with, because
+              // it only ever printed "1 / 3". A count with no total is read
+              // on its own, so it has to be a sentence.
+              const word = (n) => (pillsRequested ? (n === 1 ? 'PILL' : 'PILLS')
+                                 : drinkRequested ? (n === 1 ? 'SIP' : 'SIPS')
+                                 : (n === 1 ? 'SPOON' : 'SPOONS'));
               let given = 0;
               const pct = document.getElementById('pct');
               const fill = document.getElementById('fill');
@@ -1227,34 +1163,43 @@ const MODES = {
               // "100%", which parses as "fed 100%". Writing the zero up front
               // costs nothing and there is never a frame where the label and
               // the number describe different things.
-              if (pct) pct.textContent = `0 / ${total} ${word}`;
+              if (pct) pct.textContent = `0 ${word(0)} GIVEN`;
+              // AND THE BAR IS HIDDEN, not just emptied. A progress bar is a
+              // claim that there is progress towards something, and with the
+              // typed total gone there is nothing to be a fraction of. Left
+              // visible at 0% it reads as a meter that broke rather than as a
+              // beat that does not measure that way -- which is the same lie
+              // the invented total told, drawn instead of typed.
+              const bar = document.getElementById('bar') || (fill && fill.parentElement);
+              if (bar) bar.style.visibility = 'hidden';
+              // THE BAR IS EMPTIED AND LEFT ALONE. It measures progress
+              // towards something, and there is nothing here to progress
+              // towards -- see the note on the missing total. The count
+              // carries this beat on its own.
               if (fill) fill.style.width = '0%';
               feedLive = true;
-              const serve = () => {
+              // ONE MOUTHFUL: carry out, let go at the mouth, come back
+              // empty. `served` is called by waitForMouth when that has
+              // actually finished, so the count and the sound both happen on
+              // the far side of the travel rather than when it was asked for.
+              const carry = () => {
+                if (mode !== 'feed') return;
+                feedReach();
+                // COUNT AN ARRIVAL, NOT A TICK. This was
+                // setTimeout(serve, 1600): the number climbed on a clock and
+                // would have reached its total with the arm bolted still.
+                //
+                // waitForMouth watches the claw's real world position -- out
+                // to where feedPoseWorld(1) puts it, then home to the tray
+                // with nothing in it -- and only then counts. An arm that
+                // does not get there does not feed anybody, and the screen
+                // should say so by not counting.
+                waitForMouth(served);
+              };
+              const served = () => {
                 if (mode !== 'feed' || !pct) return;
-                pct.textContent = `${given} / ${total} ${word}`;
-                if (fill) fill.style.width = `${(given / total) * 100}%`;
-                if (given >= total) {
-                  // Land on the last one and stop, rather than looping back
-                  // to zero while a judge is watching the number.
-                  // THE PROP GOES BACK FIRST. It is a child of the wrist now,
-                  // so parking the arm without releasing would fold the bowl
-                  // away with it -- and setPhase cannot help, because a
-                  // standing reach point overrides every pose target.
-                  feedDrop();
-                  fleet[1]?.arm.setPhase('rest');
-                  // THE BEAT IS OVER, SO THE CARE COUNT STOPS. `mode` stays
-                  // 'feed' until the operator presses another mode key, and
-                  // the script has the presenter talking over the transition
-                  // for about 25 seconds with the arms parked at rest. Gating
-                  // the count on the mode NAME counted all of that as care
-                  // delivered while nothing on screen was moving -- the
-                  // stopwatch-pretending-to-be-a-measurement this panel
-                  // exists to avoid. See stepCare.
-                  feedLive = false;
-                  return;
-                }
                 given += 1;
+                pct.textContent = `${given} ${word(given)} GIVEN`;
                 // ONE SOUND PER MOUTHFUL. The demo script tells the presenter
                 // to stop talking and let the sound carry the beat, and
                 // feeding was silent -- three of the five beats on this
@@ -1262,17 +1207,19 @@ const MODES = {
                 // the scrub. A soft tick per spoonful gives the count a
                 // rhythm an audience can follow without watching the number.
                 play('click');
-                liftBowl(prop);
-                modeTimers.push(setTimeout(serve,
-                  pillsRequested ? 2200 : drinkRequested ? 1900 : 1600));
+                // AND AGAIN, until somebody stops it. There is no count to
+                // reach, so the beat ends the way a real meal does: the
+                // person is done, and the operator changes the mode. leave()
+                // is what stops the arm, drops the prop and clears feedLive.
+                carry();
               };
+              const serve = carry;
 
               // THE ARM GOES TO THE TRAY FIRST, and the prop is put where its
               // claw lands. Nothing is served until that travel has happened,
               // because the arm's springs are slow and a grab fired before it
-              // arrived is honestly refused -- the bowl would then sit on the
-              // tray for the whole beat while the counter ticked.
-              feedBegin(prop);
+              // arrived is honestly refused.
+              feedBegin();
               modeTimers.push(setTimeout(() => {
                 // ONE arm is working, so light ONLY its territory. This is
                 // what focus() exists for: the audience can see which part of
@@ -1292,27 +1239,12 @@ const MODES = {
               // would ride the arm through the whole next mode, invisible but
               // still attached, and the scrub's own sponge swap would then be
               // fighting a passenger.
-              feedDrop();
-              if (bowlTween) { bowlTween.kill(); bowlTween = null; }
-              if (bowl) bowl.visible = false;
-              if (glass) glass.visible = false;
+              feedEnd();
               // Switching away MID-BEAT must stop the care count too, or the
               // flag stays true for the rest of the demo and every later
               // second counts as feeding. serve() only clears it when the
               // last spoonful lands, which is the other way out.
               feedLive = false;
-              // THE TOOL GOES BACK. Leaving the spoon on and the sponge off
-              // would break the next scrub cycle's picture, and leave() is the
-              // only place that knows this mode is over.
-              const fed = fleet[1] && fleet[1].arm;
-              // THROUGH swapIn, NOT .visible. swapOut leaves the mesh at
-              // scale 0.001, so setting visible alone would put an
-              // invisible speck back on the arm and the next scrub cycle
-              // would run with no sponge on screen.
-              if (fed && fed.sponge) swapIn(fed.sponge);
-              // And the spoon goes away the same way it arrived, so the
-              // exchange reads in both directions.
-              if (spoon) swapOut(spoon);
               pillsRequested = false;
               drinkRequested = false;
               borrowPct(false);
@@ -1327,6 +1259,8 @@ const MODES = {
               // Hand the bar back to the cleanliness counter at whatever it
               // actually holds, or the next scrub starts from a feeding bar.
               const fill = document.getElementById('fill');
+              const bar = document.getElementById('bar') || (fill && fill.parentElement);
+              if (bar) bar.style.visibility = '';
               if (fill && typeof recs !== 'undefined' && typeof cleaned !== 'undefined') {
                 fill.style.width = `${recs.length ? (cleaned / recs.length) * 100 : 0}%`;
               }
@@ -1960,52 +1894,6 @@ function showGovernor(on) {
   });
 }
 
-/** Put a tool away: shrink it to nothing, then hide it.
- *
- *  The scale is remembered on the object the first time it is touched, so
- *  this can never lose a measured value -- the spoon is authored at 0.55 and
- *  the sponge at 1.0, and each was set against the character with a ruler.
- *  A tween that ended on a literal would quietly resize one of them.
- */
-function swapOut(obj) {
-  if (!obj) return;
-  if (obj.userData.toolScale === undefined) obj.userData.toolScale = obj.scale.x;
-  if (!obj.visible) return;                   // already away, nothing to play
-  // WINDOW.GSAP WITH A FALLBACK, like every other tween on this page. A bare
-  // `gsap` would throw if the vendored copy failed to load, and this runs
-  // inside a mode switch -- the throw would take the whole keypress with it,
-  // leaving the demo stuck in shower. Without gsap the tool just swaps
-  // instantly, which is exactly what it did before this change.
-  if (!window.gsap) { obj.visible = false; return; }
-  window.gsap.killTweensOf(obj.scale);
-  window.gsap.to(obj.scale, {
-    x: 0.001, y: 0.001, z: 0.001, duration: 0.22, ease: 'back.in(2)',
-    onComplete: () => { obj.visible = false; },
-  });
-}
-
-/** Take a tool out: appear at nothing and grow to the authored size. */
-function swapIn(obj) {
-  if (!obj) return;
-  if (obj.userData.toolScale === undefined) obj.userData.toolScale = obj.scale.x;
-  const to = obj.userData.toolScale;
-  if (!window.gsap) { obj.scale.setScalar(to); obj.visible = true; return; }
-  window.gsap.killTweensOf(obj.scale);
-  // STARTS SMALL EVERY TIME, including when it was already showing. Entering
-  // feed twice in a row (which `shift+8` from inside feed does) would
-  // otherwise play no animation on the second one, and the beat the script
-  // narrates would happen only sometimes.
-  obj.scale.setScalar(0.001);
-  obj.visible = true;
-  // A SHORT HOLD FIRST, so the two tools do not cross in mid-air. The sponge
-  // takes 0.22s to shrink away; starting the spoon at 0.12 means the hand is
-  // visibly empty for a moment, which is what makes it read as an exchange
-  // rather than a morph.
-  window.gsap.to(obj.scale, {
-    x: to, y: to, z: to, duration: 0.26, delay: 0.12, ease: 'back.out(2)',
-  });
-}
-
 /** Push the travel fraction at the feeding arm, once per frame.
  *
  *  Called from the render loop rather than set once, because feedPose reads
@@ -2017,125 +1905,201 @@ function stepFeedCarry() {
   fleet[1]?.arm.feedPose(feedCarry.t);
 }
 
-/** Put the prop back on the tray and hand the arm back to its pose targets.
- *  Shared by the estop, the mode exit and the end of each mouthful. */
-function feedDrop(park = true) {
-  const arm = fleet[1]?.arm;
-  // RELEASED WHERE IT IS. arm.release() uses Object3D.attach, so the prop does
-  // not jump at the moment it leaves the claw -- it stays at the mouth, which
-  // is where the claw let go of it.
-  if (feedHeld && arm) arm.release(feedHeld, scene);
-  // PUTTING IT BACK ON THE TRAY IS A SEPARATE DECISION, and the mid-beat
-  // release does not make it. A prop that snapped to the tray the instant the
-  // claw opened would be teleporting again, one layer down from where this
-  // change removed the teleport.
-  if (feedHeld && park) feedHeld.position.copy(feedTray);
-  feedHeld = null;
-  if (park) feedReaching = false;
+// WHO IS WAITING FOR THE ARM TO COME BACK. One at a time, because one arm
+// carries one mouthful; a second waiter would be a second mouthful in flight.
+let feedWait = null;
+
+// HOW CLOSE TO THE ASKED-FOR POSE COUNTS AS ARRIVED, in radians. 0.05 rad is
+// just under three degrees, which on this arm's 1.42 reach is about 4cm at the
+// claw -- close enough that the glass is at the person's face, far enough that
+// a spring which stalled partway cannot clear it.
+//
+// IT IS AN ANGLE, NOT A DISTANCE, and that is the whole point. See
+// robotarm.js poseError: the previous test asked whether the claw was within
+// 0.12 page units of the mouth, and the closest the arm ever actually got was
+// 0.1201. It counted mouthfuls by a ten-thousandth of a unit.
+const FEED_ARRIVED_RAD = 0.05;
+
+/** CALL cb ONCE THE ARM HAS BEEN TO THE MOUTH AND COME BACK TO THE TRAY.
+ *
+ *  This replaces setTimeout(serve, 1600). The difference is not cosmetic: a
+ *  timer counts mouthfuls whether or not anything moved, so an arm that is
+ *  powered down, blocked or still parked filled the readout at one spoonful
+ *  every 1.6 seconds regardless. The number on screen has to be a thing that
+ *  happened.
+ *
+ *  Two tests, in order, because either alone is satisfiable without feeding
+ *  anybody. An arm sitting at the tray has never left it, and one at the
+ *  mouth has not yet gone back for more. Only the round trip is a mouthful.
+ */
+function waitForMouth(cb) {
+  if (!fleet[1]?.arm) return;
+  feedWait = { cb, reached: false };
 }
 
-/** ONE MOUTHFUL: travel to the tray, close on the prop, carry it to the
- *  mouth, let go. The prop has NO tween of its own at any point -- from the
- *  grab to the release it is a child of the wrist, so it arrives only because
- *  the arm did.
- *
- *  This replaces a 1.5s tween that slid the bowl from a typed tray position
- *  to a typed mouth position while the arm played its own animation beside
- *  it. The two read as one action and were not one: the bowl made the
- *  identical trip whether the arm moved or not, which is the kind of claim
- *  docs/HOW-IT-WORKS.md section 4 forbids the screen from making.
- *
- *  gsap drives ONE NUMBER, the travel fraction, and the arm turns that into a
- *  pose. With no gsap the fraction is set straight to each end and the arm's
- *  own springs still carry it there -- less eased to read, still the arm
- *  doing the carrying.
- */
-/** SEND THE ARM TO THE TRAY AND PUT THE PROP ON IT. Called once when feed
- *  opens, before the first mouthful.
- *
- *  It exists because the arm's springs are heavily damped -- measured, they
- *  take over three seconds to close on a new pose, while a mouthful is 1.6 to
- *  2.2 -- so an arm asked to fetch from the tray inside one mouthful never
- *  gets there and the grab is honestly refused every time. Travelling to the
- *  tray ONCE, during the 400ms the mode already spends opening, means the claw
- *  is on the bowl by the time the first spoonful is called for, and every
- *  mouthful after it is a carry out and a carry back.
- *
- *  The prop is placed at feedPoseWorld(0), which is where the claw WILL be.
- *  That is the whole difference from the constant this replaces: the tray is
- *  defined by the arm's reach rather than by a number sitting beside it.
- */
-function feedBegin(prop) {
-  const obj = prop || bowl;
+/** Poll the arm against what waitForMouth is waiting for. Called from the
+ *  render loop after arm.update, so it reads the pose of the frame that was
+ *  just drawn rather than the one before it. */
+function stepFeedWait() {
+  if (!feedWait) return;
   const arm = fleet[1]?.arm;
-  if (!obj || !arm) return;
-  if (bowlTween) { bowlTween.kill(); bowlTween = null; }
-  feedDrop();
+  if (!arm) { feedWait = null; return; }
+  // WHICH END IT IS HEADING FOR is feedCarry.t, the same number feedPose is
+  // being driven with, so this cannot ask about a pose the arm was not sent
+  // to. poseError is the distance still to travel in joint space.
+  if (arm.poseError() > FEED_ARRIVED_RAD) return;
+  if (!feedWait.reached) {
+    feedWait.reached = true;
+    // ARRIVED AT THE FACE, SO NOW TURN ROUND. The travel fraction goes back
+    // to 0 here rather than on a timeline, and that is what makes the arm
+    // reach the face at all: the springs get to finish the trip before
+    // anything asks them to come back. See liftBowl.
+    feedCarry.t = 0;
+    // AND THE RETURN LEG IS NOT JUDGED UNTIL THE ARM HAS BEEN TOLD ABOUT IT.
+    // The line above only moves the number; stepFeedCarry turns it into a
+    // pose target on the NEXT frame, and until it does, poseError still
+    // reports the error against the mouth -- which is nearly zero, because
+    // the arm just got there. Without this flag the very next frame would
+    // read "arrived" a second time and count a mouthful for the return leg
+    // the arm had not started.
+    feedWait.turning = true;
+    return;
+  }
+  // The pose target now names the tray, so the error means the journey home.
+  if (feedWait.turning) { feedWait.turning = false; return; }
+  // AND HOME AGAIN. The prop is held for the whole beat, so the mouthful is
+  // the round trip.
+  const cb = feedWait.cb;
+  feedWait = null;
+  cb();
+}
+
+/** END THE BEAT AND HAND THE ARM BACK TO ITS POSE TARGETS. The estop, the
+ *  mode exit, and feedBegin clearing up after a previous run.
+ *
+ *  It used to release a prop from the claw as well. There is no prop any
+ *  more -- the bowl, the glass and the spoon are gone and the sponge is the
+ *  only thing this arm ever wears -- so all that is left is handing the
+ *  joints back to setPhase.
+ */
+function feedEnd() {
+  feedReaching = false;
+  // NOBODY IS WAITING ANY MORE. A pending waiter outlives the beat otherwise,
+  // and the frame the arm happens to pass the tray on its way to rest would
+  // count one more mouthful after the estop.
+  feedWait = null;
+  // AND THE BEAT IS NOT LIVE. stepCare counts seconds of care for as long as
+  // this is true, so leaving it set after a stop keeps a stopped machine
+  // clocking up care delivered.
+  feedLive = false;
+}
+
+/** SEND THE ARM DOWN TO THE TRAY END OF ITS TRAVEL. Called once when feed
+ *  opens, before the first mouthful, so the first trip to the face starts
+ *  from the same place every later one does.
+ *
+ *  "The tray" is not a surface any more, and never was a mesh: it is simply
+ *  the low end of this arm's feeding travel, asked of the arm rather than
+ *  typed beside it.
+ */
+// Scratch vectors for the mouth solve, so a per-mouthful call allocates
+// nothing in the render loop's neighbourhood.
+const _mouthPt = new THREE.Vector3();
+
+/** WHERE TO OFFER FOOD, in world space, measured off the character.
+ *
+ *  Returns null when there is no head to measure -- and a null here means the
+ *  arm keeps the mouth pose it already had rather than reaching at a guess.
+ *
+ *  IT IS THE HEAD ITSELF, WITH NO GAP ADDED, and that is not an oversight.
+ *  Two offsets were tried and both made it worse. Offsetting along the
+ *  character's own forward put the point at z=0.93 while the arm is bolted at
+ *  z=0.25 -- behind the face from the arm's side. Offsetting toward the arm
+ *  sent the claw down to y=0.90, a long way under a face at y=1.48.
+ *
+ *  Then the workspace was swept exhaustively -- every reachable combination
+ *  of the three joints, against this character's measured head -- and the
+ *  closest the claw can come is 0.329 units, at (0.02, 1.50, 0.25) against a
+ *  head at (0.00, 1.48, -0.08). Right height, right side, 0.33 short in
+ *  depth. This arm CANNOT touch this person's face from where it is mounted.
+ *
+ *  So the gap is already there and it is the arm's own reach that sets it,
+ *  which is the honest version of the "offer, do not push it into their head"
+ *  picture the old typed pose was aiming at. Asking for the head and landing
+ *  where the linkage runs out states the real constraint. Adding a number on
+ *  top of that would be inventing a second gap in front of a real one.
+ */
+function mouthWorld(out) {
+  const head = avatar?.node?.head;
+  if (!head) return null;
+  head.updateWorldMatrix(true, false);
+  return (out || new THREE.Vector3()).setFromMatrixPosition(head.matrixWorld);
+}
+
+/** POINT THE FEED TRAVEL AT THE PERSON'S ACTUAL FACE.
+ *
+ *  Called when the beat opens and again before each mouthful, so a character
+ *  who is reseated, swapped for a different one, or moved by the measured
+ *  body is fed where they now are rather than where they were.
+ */
+function aimAtMouth() {
+  const arm = fleet[1]?.arm;
+  if (!arm) return;
+  const pt = mouthWorld(_mouthPt);
+  if (!pt) return;
+  const miss = arm.solveFeedMouth(pt);
+  // NOT SILENT WHEN IT CANNOT REACH. The arm's best against this character is
+  // a measured 0.329 (see mouthWorld), so anything much past that is not the
+  // known shortfall -- it is a solve that stopped somewhere worse, and the
+  // screen should not show an arm feeding a point it wandered into.
+  if (miss > 0.45) console.warn(`feed: closest approach to the mouth is ${miss.toFixed(2)} units`);
+}
+
+function feedBegin() {
+  const arm = fleet[1]?.arm;
+  if (!arm) return;
+  aimAtMouth();
+  // CLEAR A PREVIOUS RUN'S WATCHER, WITHOUT ENDING THIS ONE. feedEnd() also
+  // clears feedLive, which enter() has just set -- calling it here put the
+  // care clock back to sleep on the same frame the beat started, and the
+  // panel read empty for the whole beat. Only the watcher is stale here.
+  feedWait = null;
+  // WHERE THE LOW END IS, asked of the arm: feedPoseWorld(0) poses the chain
+  // there and reads the claw back. Kept because the HUD and the tests read
+  // it, and because it must be the arm's own number rather than a constant.
   arm.feedPoseWorld(0, feedTray);
-  obj.position.copy(feedTray);
   feedCarry.t = 0;
   feedReaching = true;
 }
 
-function liftBowl(prop) {
-  const obj = prop || bowl;
-  const arm = fleet[1]?.arm;
-  if (!obj || !arm) return;
-  if (bowlTween) bowlTween.kill();
-
-  const grab = () => {
-    // THE PROP CANNOT ARRIVE IF THE ARM DID NOT. The grab reads where the claw
-    // actually is and refuses when it is not on the prop, so an arm that
-    // failed to travel leaves the bowl on the tray and the screen shows an arm
-    // that tried rather than a bowl that teleported.
-    const tool = arm.toolWorld(new THREE.Vector3());
-    // 0.12 of page units against the arm's own 1.42 reach, under a tenth of
-    // it: the claw has to be ON the prop, not near it. That is affordable
-    // because the tray pose was chosen to be one the arm closes on quickly --
-    // measured at 0.005 of error after 1.2 seconds from rest -- so a real
-    // arrival clears this easily and a failure to travel does not.
-    if (tool.distanceTo(feedTray) > 0.12) return;
-    arm.grip(obj);
-    feedHeld = obj;
-  };
-
-  // LET GO AT THE MOUTH, WITHOUT PARKING. The prop stays where the claw left
-  // it -- a bowl set down in front of the person -- and the arm travels back
-  // to the tray empty, which is what feeding someone actually looks like: the
-  // spoon goes back for more. Parking here would be a teleport one layer down
-  // from the one this change removed.
-  const drop = () => { feedDrop(false); feedReaching = true; };
-  // AND THE PROP GOES BACK WHEN THE CLAW IS BACK, not before. By now the arm
-  // has travelled home, so moving the bowl onto the tray puts it under a claw
-  // that is already there rather than sliding it across the room.
-  const restock = () => { if (!feedHeld) obj.position.copy(feedTray); };
-
-  if (!window.gsap) {
-    // NO ANIMATION LIBRARY, SAME MECHANISM. The travel fraction is set
-    // straight to each end and the arm's springs interpolate between them, so
-    // the bowl is still carried rather than moved.
-    grab();
-    feedCarry.t = 1;
-    modeTimers.push(setTimeout(() => { drop(); feedCarry.t = 0; }, 900));
-    modeTimers.push(setTimeout(restock, 1800));
-    return;
-  }
-
-  // CLOSE, CARRY IN, HOLD AT THE MOUTH, LET GO, CARRY BACK. Eased at both
-  // ends of each leg, because a linear carry reads as a machine moving an
-  // object and an eased one reads as being careful with it, which is the
-  // whole point of the beat.
-  bowlTween = window.gsap.timeline()
-    .call(grab)
-    .to(feedCarry, { t: 1, duration: 0.70, ease: 'power2.inOut' })
-    // THE HOLD IS LONGER THAN THE TWEEN NEEDS, on purpose. The springs lag the
-    // pose they are given -- that lag is what makes the arm read as a machine
-    // with mass rather than a diagram -- so the claw is still arriving when
-    // the tween says 1. Letting go on the tween's last frame would drop the
-    // bowl half a unit short of the face.
-    .call(drop, null, '+=0.55')
-    .to(feedCarry, { t: 0, duration: 0.45, ease: 'power2.inOut' })
-    .call(restock, null, '+=0.35');
+/** ONE MOUTHFUL: ask the arm to go to the mouth. That is the whole function.
+ *
+ *  It used to grab a bowl, carry it, drop it at the mouth and restock the
+ *  tray. All of that is gone with the props: what a viewer sees is the arm
+ *  reaching to the person's face and coming back, and that is also exactly
+ *  what the counter counts.
+ *
+ *  AND THE TRAVEL IS NOT ON A CLOCK. This used to tween the travel fraction
+ *  to 1 over 0.70s and back over 0.45s. feedPose sets a spring TARGET, and
+ *  these springs are heavily damped -- measured on this arm, the claw covered
+ *  0.345 of the 0.894 units between the two ends before the tween turned it
+ *  round, so the arm was pulled back at 39% of the way to the face on every
+ *  mouthful and the count never moved. A tween that finishes before the thing
+ *  it drives has arrived is a clock wearing an animation's clothes.
+ *
+ *  So the fraction is set to 1 and LEFT there. stepFeedWait watches the arm
+ *  and puts it back to 0 once it has actually reached the mouth, so the turn
+ *  happens because the arm arrived, not because 0.70 seconds passed.
+ */
+function feedReach() {
+  if (!fleet[1]?.arm) return;
+  // RE-AIMED EVERY MOUTHFUL. The head is not nailed down -- the idle clip
+  // moves it, reseating moves it, and a measured body moves it a lot -- so a
+  // mouth solved once when the beat opened would drift out of date while the
+  // arm kept reaching at where the face used to be.
+  aimAtMouth();
+  feedReaching = true;
+  feedCarry.t = 1;
 }
 
 function setMode(next) {
@@ -2313,108 +2277,6 @@ try {
     // setSeated folds the legs and picks its own drop; then override the root
     // with the height solved against THIS chair's seat, so body and chair are
     // one solution rather than two guesses that have to agree by luck.
-    // THE BOWL, loaded beside the chair so one failed fetch cannot leave the
-    // feeding mode half-built. Hidden until that mode is chosen.
-    try {
-      const bg = await new GLTFLoader().loadAsync('./assets/bowl-soup.glb');
-      bowl = bg.scene;
-      bowl.traverse((o) => {
-        if (!o.isMesh) return;
-        o.castShadow = true;
-        if (o.material && o.material.map) {
-          o.material = new THREE.MeshToonMaterial({ map: o.material.map, gradientMap: ramp });
-        }
-      });
-      // MEASURED, after a screenshot showed a bowl bigger than the
-      // character's head. The Kenney bowl ships 0.50 units wide and I scaled
-      // it UP by 2.4 on the assumption that food-kit props are small; they
-      // are not, they are authored at roughly the same scale as the
-      // characters. A soup bowl held by a person is about 0.15 of their
-      // height, the seated cartoon is about 1.5, so the bowl wants to be
-      // ~0.22 wide: 0.22 / 0.50 = 0.44.
-      bowl.scale.setScalar(0.44);
-      bowl.position.set(BOWL_REST.x, BOWL_REST.y, BOWL_REST.z);
-      bowl.visible = false;
-      scene.add(bowl);
-    } catch (e) {
-      console.warn('bowl failed to load, feeding will be armless:', e);
-    }
-
-    // THE SPOON THE FEEDING ARM HOLDS. Vendored with the food kit and never
-    // loaded until now, so nothing was built for this.
-    //
-    // SCALED FROM MEASUREMENT, not from taste, because the bowl taught this
-    // lesson once already: food-kit props are authored at character scale, and
-    // assuming they are small put a soup bowl bigger than the character's head
-    // on screen. The spoon measures 0.666 long raw; 0.375 brings it to 0.25,
-    // a little longer than the bowl is wide (0.221), which is the real-world
-    // proportion of a soup spoon to a soup bowl.
-    try {
-      const sg = await new GLTFLoader().loadAsync('./assets/cooking-spoon.glb');
-      spoon = sg.scene;
-      spoon.traverse((o) => {
-        if (!o.isMesh) return;
-        o.castShadow = true;
-        if (o.material && o.material.map) {
-          o.material = new THREE.MeshToonMaterial({ map: o.material.map, gradientMap: ramp });
-        }
-      });
-      // 0.55, NOT 0.375. The ruler said 0.375 gives a 0.25 spoon against a
-      // 0.221 bowl, which is the real-world ratio -- and a screenshot showed
-      // a sliver, because the model is 0.024 thick and no scale fixes that.
-      // 0.55 makes it 0.366 long, comparable to the 0.30 sponge it replaces,
-      // which is what has to read from ten feet. The bowl taught this same
-      // lesson in the other direction.
-      spoon.scale.setScalar(0.55);
-      spoon.visible = false;
-      spoon.rotation.z = Math.PI / 2;    // lying along the forearm, not across
-      // PARENTED TO THE ARM, NOT THE SCENE. `scene.add` with a y of 0.62 put
-      // it at the world origin under the chair, where a screenshot found it:
-      // the sponge vanished correctly and nothing replaced it, so the arm
-      // ended in a bare grip. The spoon has to hang off the same forearm the
-      // sponge does or the swap reads as losing a tool rather than changing
-      // one.
-      //
-      // robotarm.js exports the sponge but not its parent, so the sponge's
-      // own parent IS the attach point -- and using it means the spoon lands
-      // exactly where the sponge was without a second position to keep in
-      // step with it.
-      // Parked in the scene for now. The fleet does not exist yet at this
-      // point in the boot -- the arms are built about 200 lines below -- so
-      // the mount happens there, once there is a forearm to hang it on.
-      scene.add(spoon);
-    } catch (e) {
-      console.warn('spoon failed to load, the arm keeps its sponge:', e);
-    }
-
-    // THE GLASS, for the pill beat. Pill feeding is its own line in the
-    // brainstorm, and until now saying "here are your pills" produced the
-    // same soup bowl -- the voice claiming one thing while the screen showed
-    // another, which is the single worst kind of demo bug.
-    //
-    // There is no pill bottle in the Kenney food kit (checked every prop in
-    // it). A glass of water is the honest stand-in: medication is taken WITH
-    // water, and a small glass reads instantly different from a soup bowl at
-    // projector distance, which is the whole job here.
-    try {
-      const gg = await new GLTFLoader().loadAsync('./assets/glass.glb');
-      glass = gg.scene;
-      glass.traverse((o) => {
-        if (!o.isMesh) return;
-        o.castShadow = true;
-        if (o.material && o.material.map) {
-          o.material = new THREE.MeshToonMaterial({ map: o.material.map, gradientMap: ramp });
-        }
-      });
-      // 0.16 wide at scale 1; 0.81 puts it at ~0.13, a cup rather than a vase.
-      glass.scale.setScalar(0.81);
-      glass.position.set(BOWL_REST.x, BOWL_REST.y, BOWL_REST.z);
-      glass.visible = false;
-      scene.add(glass);
-    } catch (e) {
-      console.warn('glass failed to load, pills will be armless:', e);
-    }
-
     avatar.setSeated(true);
     avatar.root.rotation.y = CHAIR_YAW;
     avatar.root.position.y = SEATED_ROOT_Y;
@@ -2843,24 +2705,6 @@ try {
     scene.add(strut);
   }
 
-  // HANG THE SPOON ON THE FEEDING ARM, now that the arm exists. It is loaded
-  // much earlier (beside the bowl, so one failed fetch cannot half-build the
-  // feeding mode) and parked in the scene until here.
-  //
-  // A screenshot caught the version that skipped this: the sponge vanished on
-  // entering feed and nothing replaced it, so the arm ended in a bare grip and
-  // the swap read as losing a tool rather than changing one. The spoon was
-  // sitting at the world origin under the chair.
-  //
-  // robotarm.js exports the sponge but not its parent, so the sponge's own
-  // parent IS the attach point -- which also means the spoon lands exactly
-  // where the sponge was, with no second position to keep in step.
-  if (spoon && fleet[1] && fleet[1].arm && fleet[1].arm.sponge) {
-    const sp = fleet[1].arm.sponge;
-    spoon.position.copy(sp.position);
-    sp.parent.add(spoon);
-  }
-
   // NO PROPS BESIDE THE CHARACTER. A wheelchair stood here; Tyler asked for it
   // gone. I had added it unasked, reasoning that the caregiving
   // purpose was never visible on screen. Two reasons it was wrong regardless:
@@ -3123,15 +2967,11 @@ function stopScrubChoreography() {
   modeTimers.forEach(clearTimeout);
   modeTimers = [];
   if (modeTick !== null) { clearTimeout(modeTick); modeTick = null; }
-  // The props go down with the arms. A bowl left floating at a stopped
-  // person's mouth is the same lie in a different form.
-  // OUT OF THE CLAW FIRST, and the carry tween killed with it: a stop that
-  // leaves the prop parented to the wrist has the arm still carrying it
-  // while the HUD says everything stopped.
-  if (bowlTween) { bowlTween.kill(); bowlTween = null; }
-  feedDrop();
-  if (bowl) bowl.visible = false;
-  if (glass) glass.visible = false;
+  // AND THE PENDING ARRIVAL WATCHER GOES WITH THEM. feedEnd clears it, so no
+  // mouthful is counted after the stop: the arm passes back through the low
+  // end of its feed travel on its way to rest, and a watcher still running
+  // would read that as one more trip to the person's mouth.
+  feedEnd();
   fleetPhase('rest');
 }
 
@@ -3954,6 +3794,20 @@ addEventListener('keydown', async (e) => {
       avatar.squash?.('torso', 0.16);
     } else {
       flashHold('NO LINK — HIT SPACE IN THE PYTHON WINDOW / CUT POWER', true);
+      // THE CARTOON STOPS EITHER WAY. The branch above already argues that an
+      // operator who pressed the stop must never watch the screen keep going
+      // while the page waits for a reply -- and then this branch, the one
+      // where there is no reply coming at all, let it keep going forever.
+      // Measured: `x` with the socket down, then 14 seconds later the feed
+      // counter moved from 1 SIP to 2 while the banner read CUT POWER.
+      //
+      // Nothing here claims the hardware stopped; the banner still says to
+      // cut power, and that is the only claim being made. This stops the
+      // drawing, which is the one thing this page can actually stop.
+      stopScrubChoreography();
+      cycleLive = false;
+      setCycle(false);
+      play('thunk');
     }
   }
   // CLEAR an emergency stop from the projector. The torque watchdog fires on
@@ -4419,8 +4273,6 @@ window.__wheelgentic = { scene, camera, avatar, recs, renderer,
                      // That parentage IS the feature: a bowl on the scene is
                      // a bowl being tweened beside an arm, and no screenshot
                      // can tell the two apart from one frame.
-                     get bowl() { return bowl; },
-                     get glass() { return glass; },
                      get voice() { return voice; },
                      get voiceFault() { return voiceFault; },
                      // read-only view of the live-cycle flag, so a test can

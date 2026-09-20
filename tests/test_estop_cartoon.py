@@ -197,12 +197,24 @@ async def main():
         # The feed beat runs on `modeTimers`, a list added to main.js after
         # this test was written, and stopScrubChoreography cleared only the
         # scrub's own timers. So `x` during feeding parked the arms and then
-        # the pending serve() fired ~1.6s later, set the arm back to 'hover'
-        # and lifted the bowl to the person's mouth. After an emergency stop.
+        # the pending serve() fired ~1.6s later and sent the arm back to the
+        # person's mouth. After an emergency stop.
         #
-        # The wait is deliberately longer than the 1.6s serve interval: the
-        # whole failure is a timer that fires AFTER everything looks stopped,
-        # so a short wait would pass on the broken code.
+        # WHAT IS WATCHED CHANGED, WHAT IS BEING TESTED DID NOT. This used to
+        # read the soup bowl's visibility. The bowl, the glass and the spoon
+        # were all removed on 2026-09-20 -- the arms carry nothing now and the
+        # sponge is the only prop on screen -- so the instrument had to become
+        # something that still exists.
+        #
+        # The counter is the better one anyway: it is incremented only when
+        # the arm completes a round trip to the person's face, so a count that
+        # moves after the stop IS the arm moving after the stop, with no mesh
+        # in between to be visible for some other reason.
+        #
+        # The waits are deliberately long. The whole failure is something that
+        # happens AFTER everything looks stopped, and one round trip of this
+        # arm takes about twelve seconds, so a short wait passes on broken
+        # code.
         # Runs AFTER section 3, which already cleared the estop and proved a
         # cycle arms again -- so the machine is live here, which is the only
         # state in which this check means anything.
@@ -210,22 +222,21 @@ async def main():
         await pg.wait_for_timeout(600)
         await pg.keyboard.press("Shift+KeyC")
         await pg.wait_for_timeout(1200)
-        await pg.keyboard.press("8")          # feed: the bowl travels
-        await pg.wait_for_timeout(1800)       # past the 400ms lift, mid-serve
-        bowl_up = await pg.evaluate(
-            "()=>{const s=window.__wheelgentic.scene;let v=false;"
-            "s.traverse(o=>{if(o.name==='bowl-soup'&&o.type==='Group')v=o.visible;});"
-            "return v;}")
-        check("the bowl is up before the estop", bowl_up, bowl_up)
+        await pg.keyboard.press("8")          # feed: the arm reaches
+        read = ("()=>document.getElementById('pct').textContent")
+        # Long enough for at least one mouthful to land, so the number below
+        # is one the arm actually earned rather than the opening zero.
+        await pg.wait_for_timeout(15000)
+        before = await pg.evaluate(read)
+        check("the feed counter is running before the estop", True, before)
         await pg.keyboard.press("x")
-        await pg.wait_for_timeout(2600)       # LONGER than the 1.6s serve tick
-        still = await pg.evaluate(
-            "()=>{const s=window.__wheelgentic.scene;let v=false;"
-            "s.traverse(o=>{if(o.name==='bowl-soup'&&o.type==='Group')v=o.visible;});"
-            "return v;}")
-        check("and 'x' puts it down and keeps it down", not still,
-              "down" if not still
-              else "BOWL BACK AT THE MOUTH AFTER AN ESTOP")
+        # LONGER THAN A ROUND TRIP, so an arm that kept going has time to
+        # finish one and show it.
+        await pg.wait_for_timeout(15000)
+        after = await pg.evaluate(read)
+        check("and 'x' stops the count and keeps it stopped", after == before,
+              after if after == before
+              else f"COUNTED AFTER AN ESTOP: {before} -> {after}")
 
         check("no page errors", not errs, str(errs))
         await b.close()

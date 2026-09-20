@@ -446,8 +446,20 @@ export function makeRobotArm(scene, ramp, region) {
   // claw was already sitting on). Two poses read off the real workspace are
   // honest about what this drawing can solve; a solver that misses by 0.7 and
   // is called anyway is not.
+  // THE TRAY IS A PARKING POSE and stays a pose: it is where this arm rests
+  // between mouthfuls, chosen for the arm's own dynamics (see above), and it
+  // is not a claim about anything in the world.
   const FEED_TRAY  = { yaw: -0.25, sh: 0.00, el: 1.05 };
-  const FEED_MOUTH = { yaw:  1.00, sh: 0.80, el: 1.50 };
+  // THE MOUTH IS NOT A POSE. It used to be { yaw: 1.00, sh: 0.80, el: 1.50 },
+  // three angles picked by eye, and the arm swung to them regardless of where
+  // the person's face actually was. Seat the character differently, load a
+  // taller one, or let the measured body move the head, and the arm still fed
+  // the same patch of air.
+  //
+  // It is now solved per mouthful against the head's real world position by
+  // solveFeedMouth() below. This holds whatever that solve last returned, so
+  // feedPose and feedPoseWorld keep the shape they had.
+  let FEED_MOUTH = { yaw: 1.00, sh: 0.80, el: 1.50 };
 
   let target = { ...REST };
   let cur    = { ...REST };
@@ -672,6 +684,96 @@ export function makeRobotArm(scene, ramp, region) {
       reachPt = null;
     },
 
+    /** WHERE THE CLAW LANDS for one candidate set of the three angles, without
+     *  moving the drawn arm. The forward kinematics on their own.
+     *
+     *  Exposed so a test can sweep the whole workspace and say what this arm
+     *  can actually reach, rather than trusting a solver's own report that it
+     *  converged -- a descent that stops in a local minimum reports the same
+     *  shape of answer as one that found the point.
+     */
+    probeClaw(qYaw, qSh, qEl, out) {
+      const keep = { y: yaw.rotation.y, u: upper.rotation.x, f: fore.rotation.x };
+      yaw.rotation.y   = clampJoint('yaw', qYaw);
+      upper.rotation.x = clampJoint('sh',  qSh);
+      fore.rotation.x  = clampJoint('el',  qEl);
+      root.updateWorldMatrix(true, true);
+      (out || new THREE.Vector3()).setFromMatrixPosition(sponge.matrixWorld);
+      yaw.rotation.y = keep.y; upper.rotation.x = keep.u; fore.rotation.x = keep.f;
+      root.updateWorldMatrix(true, true);
+      return out;
+    },
+
+    /** POINT THE MOUTH END OF THE FEED TRAVEL AT A REAL WORLD POSITION.
+     *
+     *  Give it where the person's face is and it finds the three angles that
+     *  put the claw in front of it. Everything after that -- feedPose,
+     *  feedPoseWorld, the arrival test the page counts mouthfuls with -- uses
+     *  the answer without knowing it changed.
+     *
+     *  WHY NOT solveIK. The note beside FEED_TRAY explains it: solveIK models
+     *  a yaw and two links turning about X, and this arm is also rolled 45
+     *  degrees about Z by its measured mount, which that decomposition does
+     *  not carry. Asked for a world point it lands the claw 0.61 to 0.82 away.
+     *
+     *  So this does not decompose anything. It poses the real chain, reads
+     *  where the claw actually went, and walks each joint down the error --
+     *  the same forward kinematics the arm is drawn with, so every rotation,
+     *  offset and roll in it is carried by construction rather than modelled
+     *  a second time. A numerical descent is slower than a closed form and
+     *  cannot be wrong about the geometry; on a per-mouthful call that is the
+     *  right trade. Roughly 3 x 24 chain poses, about a millisecond.
+     *
+     *  Returns the distance from the claw to the requested point, in world
+     *  units, so a caller can tell a solve from a failure. It does NOT move
+     *  the drawn arm: every angle is restored before it returns.
+     */
+    solveFeedMouth(point) {
+      if (!point) return Infinity;
+      const keep = { y: yaw.rotation.y, u: upper.rotation.x, f: fore.rotation.x };
+      const probe = new THREE.Vector3();
+      // Read the claw for a candidate set of angles. The clamps are the same
+      // ones update() applies, so the solve can never return a pose the drawn
+      // arm would refuse to hold.
+      const err = (q) => {
+        yaw.rotation.y   = clampJoint('yaw', q.yaw);
+        upper.rotation.x = clampJoint('sh',  q.sh);
+        fore.rotation.x  = clampJoint('el',  q.el);
+        root.updateWorldMatrix(true, true);
+        probe.setFromMatrixPosition(sponge.matrixWorld);
+        return probe.distanceTo(point);
+      };
+      // STARTED FROM THE OLD TYPED POSE. It is a reasonable place to be near
+      // the face, so the descent begins somewhere sane rather than at zero --
+      // and if the head has not moved much since the last solve, this is
+      // already almost the answer.
+      let q = { ...FEED_MOUTH };
+      let best = err(q);
+      // Coordinate descent: try each joint up and down by a step, keep any
+      // move that helps, and halve the step when a whole sweep helps nothing.
+      // 0.40 rad down to under a thousandth in 9 halvings.
+      for (let step = 0.40; step > 1e-3; step *= 0.5) {
+        let improved = true;
+        while (improved) {
+          improved = false;
+          for (const j of ['yaw', 'sh', 'el']) {
+            for (const dir of [1, -1]) {
+              const cand = { ...q, [j]: q[j] + dir * step };
+              const e = err(cand);
+              if (e < best - 1e-6) { best = e; q = cand; improved = true; }
+            }
+          }
+        }
+      }
+      FEED_MOUTH = q;
+      // THE DRAWN ARM IS UNTOUCHED, and the matrices are rebuilt with the
+      // angles it actually holds -- a stale world matrix here would have the
+      // next thing that reads the claw read the solve's last probe instead.
+      yaw.rotation.y = keep.y; upper.rotation.x = keep.u; fore.rotation.x = keep.f;
+      root.updateWorldMatrix(true, true);
+      return best;
+    },
+
     /** WHERE THE CLAW WOULD BE at travel fraction `t`, without moving it.
      *
      *  The page asks this once per mouthful to find out where the tray is --
@@ -710,6 +812,28 @@ export function makeRobotArm(scene, ramp, region) {
       const v = out || new THREE.Vector3();
       sponge.updateWorldMatrix(true, false);
       return v.setFromMatrixPosition(sponge.matrixWorld);
+    },
+
+    /** HOW FAR THE ARM STILL IS FROM THE POSE IT WAS ASKED FOR, in radians,
+     *  as the largest of the three joints' errors.
+     *
+     *  This is the honest form of "has it arrived". Asking it in page units
+     *  -- is the claw within X of where the mouth pose puts it -- looks more
+     *  physical and is worse, because a critically damped spring approaches
+     *  its target asymptotically and never actually reaches it. Measured on
+     *  the feeding arm, the closest the claw ever came to the mouth pose was
+     *  0.1201 units against a 0.12 test: it passed by a ten-thousandth, and
+     *  which side of the line it landed on was luck.
+     *
+     *  The joints are what the spring is actually solving, so their error is
+     *  the quantity that means "close enough to call it there", and it is in
+     *  radians rather than in a distance that changes with where the arm is
+     *  bolted.
+     */
+    poseError() {
+      return Math.max(Math.abs(target.sh - cur.sh),
+                      Math.abs(target.el - cur.el),
+                      Math.abs(yawTarget - yawCur));
     },
 
     /** Park it beside the character's scrubbed arm. */

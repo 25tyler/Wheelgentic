@@ -56,6 +56,8 @@ set of numbers make that visible.
 | the arms' shape | the OpenYAM URDF and its nine STL meshes | baked to `web/assets/armgeom.json` |
 | where the arms are bolted | the depth camera, with a person in the chair | `scrub3d/live/live_rig_openyam.json` |
 | the arms' joint angles | the arms' own encoders, through dimOS | `py/armbridge.py` -> `EVENT["joints"]` |
+| where the feeding arm reaches | the character's head bone, solved against the arm's own linkage | `robotarm.js solveFeedMouth` |
+| how many mouthfuls were given | the arm completing a round trip to that point | `main.js stepFeedWait` |
 | room temperature | Crystal's Arduino | her `/api/vitals` |
 | body vitals | **nothing** | absent, and the page says so |
 
@@ -88,6 +90,16 @@ they do.
   since it was modelling a different and shorter arm, but it reported zero
   honestly instead of relaxing the safety margin until the number looked
   better.
+- The feed readout says `2 SPOONS GIVEN`, never `2 of 4`. There is no four.
+  Nothing counts pills in a dispenser or food in a bowl, so the count only
+  goes up and never implies an end it cannot see. It also only moves when the
+  arm has actually completed a trip to the person's face and back, so an arm
+  that does not move feeds nobody and the screen says so by not counting.
+- The feeding arm stops 0.33 units short of the face, and that gap is the
+  arm's reach rather than a chosen politeness. Sweeping every reachable
+  combination of its three joints against the measured head, the closest the
+  claw can come is 0.329. The arm cannot touch this person from where it is
+  bolted, and the drawing shows exactly that.
 
 ---
 

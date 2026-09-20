@@ -219,7 +219,6 @@ run "the chair answers with the arm that owns the spot" "$PY_PW" tests/test_spot
 run "the chair answers questions from live state" "$PY_PW" tests/test_voice_agent.py 12
 run "the care count only counts care" "$PY_PW" tests/test_care_counter.py 12
 run "the sponge turns only while it is on the body" "$PY_PW" tests/test_sponge_spin.py 12
-run "the tool change is an exchange you can see" "$PY_PW" tests/test_tool_swap.py 12
 run "the privacy line is evidence, not a caption" "$PY_PW" tests/test_privacy_count.py 12
 run "the handoff move keeps the frame alive" "$PY_PW" tests/test_handoff_shot.py 12
 run "steam rises during the wash" "$PY_PW" tests/test_steam.py 12
