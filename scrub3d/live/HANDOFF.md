@@ -203,3 +203,18 @@ Python 3.12 at `C:\Users\justi\AppData\Local\Programs\Python\Python312`.
 start. The camera is a RealSense D455 about 1 m up, looking about 10 to 14
 degrees down. Three arms: red low in front of the person, blue to their
 left, green to their right; a fourth (orange) was removed.
+
+## The OpenYAM arms, through dimOS (2026-09-19)
+
+Two Anvil OpenYAMs on one plate replace the RoArms for the wheelchair build.
+Everything is in `DIMOS.md`; in one paragraph: `dimos_bridge_server.py` runs
+on the Spark beside dimOS and is the only code that imports it;
+`arm_dimos.py` is a drop-in for `arm_hw.Hardware` (`--drive dimos`);
+`kinematics_openyam.py` is the arm for the governor (`SCRUB3D_ARM=openyam`).
+Proven on dimOS's mock arms from this laptop over the LAN: park, plan (62%
+reachable on the reference clip), a full pass with the sponge credited on
+skin. Not yet run on the real arms: that needs the CAN links up on the Spark
+and the plate measured into `live_rig_openyam.json`. Four traps, each of
+which cost an hour, are written up in `DIMOS.md`: one bridge at a time; never
+ask the IK for an orientation you do not need; the jaw sphere must sit behind
+the grasp frame; and park before driving.

@@ -251,44 +251,10 @@ from scrub3d's base frame (`FW_ORIGIN_MM`, 10 mm forward and 123 mm up).
 `py/arm.py` and `scrub3d/armlink.py` assume two things the firmware source
 contradicts: that the firmware's x, y, z start at the base, and that `T:0`
 is a latched stop. They also clamp to a tabletop box. Do not use them for
-these arms. `arm_hw.py` is what the live view uses.
-
-**The torque-scale finding below has now been acted on in `py/arm.py`** (the
-projector demo's driver; it is still the wrong driver for *these* arms, for
-the frame and `T:0` reasons above).
-
-The finding was: that file's contact test (shoulder effort over 550 or elbow
-over 450) can never fire with the torque caps `py/arm.py` sets itself (110
-and 50), since a servo's effort reading stays within its cap. The same was
-true of its `TORQUE_ESTOP` cutout (600-900 against caps of 50-110), so the
-demo's torque watchdog ran at 10 Hz for the whole run having checked
-nothing.
-
-Reproduced by execution against `fake_esp32.py`, which clamps its reported
-loads to the `T:112` cap as the firmware does: with the tool stalled 60 mm
-inside a surface the board reported every joint pinned at its cap
-(60/110/50/50) while `over_torque()` returned `None` and `contact` read
-`False`.
-
-`py/arm.py` now derives both thresholds from the caps it sends, at
-`arm_hw.py`'s `LOAD_NEAR_CAP` (0.9) for the cutout. It checks `torB` and
-`torH` only:
-
-- `torS` is excluded for the reason this document already gives -- it is one
-  shoulder servo's load minus the other's, zeroed at boot, so it carries an
-  unknown offset. `arm_hw.py` excludes it from `BUMP_KEYS` for the same
-  reason.
-- `torE` is excluded by measurement. Sweeping all 58,968 reachable points in
-  `py/arm.py`'s `BOX` through `fake_esp32._loads` with nothing under the
-  sponge, `torE` reaches 39.1 of its cap of 50 -- 78% -- on gravity alone.
-  Ten units of headroom cannot separate a press from a long reach, so that
-  joint is left to `py/contact.py`, which subtracts the gravity term and
-  tests the residual. `torB` and `torH` keep over 90% headroom and are
-  separable.
-
-Measured after the change: zero false positives across six poses spanning
-the box in free air, and a real cutout (`torB 60 > 54`) on the demo's own
-watchdog thread when the sponge presses.
+these arms. `arm_hw.py` is what the live view uses. Their contact test
+(shoulder effort over 550 or elbow over 450) should never fire with the
+torque caps `py/arm.py` sets itself (110 and 50), since a servo's effort
+reading stays within its cap.
 
 ## Sources
 

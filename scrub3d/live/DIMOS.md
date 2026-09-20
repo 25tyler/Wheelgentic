@@ -18,19 +18,27 @@ only code that imports dimOS. `arm_dimos.py` looks exactly like
 
 ## Run it
 
-On the Spark, mock arms first (dimOS simulates them; nothing moves). `$WG`
-is wherever this checkout lives on that machine -- the commands below are
-run from its root:
+On the Spark, mock arms first (dimOS simulates them; nothing moves):
 
 ```bash
-cd $WG && ~/dimos/.venv/bin/python scrub3d/live/dimos_bridge_server.py
+cd ~/thingy && ~/dimos/.venv/bin/python scrub3d/live/dimos_bridge_server.py
 ```
 
 Real arms, once `can0`/`can1` are up (`sudo ip link set can0 up type can bitrate 1000000`, both):
 
 ```bash
-cd $WG && ~/dimos/.venv/bin/python scrub3d/live/dimos_bridge_server.py --left-can-port can0 --right-can-port can1
+cd ~/thingy && bash scrub3d/live/bridge.sh real
 ```
+
+**Use the script, and leave it running.** It starts the bridge with this rig's
+wiring (can1 is the person's LEFT arm, can0 their right), keeps it up if it
+exits, and refuses to run two at once. Started by hand the other way round
+(`--left-can-port can0`), each arm gets the other arm's commands, and because
+the two bases face opposite ways every move comes out mirrored: the start pose
+turned a claw into the leg of the person in the chair. Do not restart it
+between live-view runs: every restart drops the arms' torque, and the live
+view reconnects to a running bridge by itself. `bridge.sh status` says whether
+it is up; `~/bridge_stops.log` says who last stopped it.
 
 The CAN interfaces reset every time an adapter is unplugged. Make them come
 up on their own, once, instead of typing the two `ip link` lines each time:
@@ -156,6 +164,15 @@ sponge was credited on skin.
 
 ## What is different from the RoArms, and what to watch
 
+- **The view draws the OpenYAM itself**, not a ball where its sponge is.
+  `armmesh_openyam.py` places i2rt's own meshes (`assets/openyam/`, MIT,
+  copied unchanged from dimOS's dual_openyam package). While driving, each
+  arm is drawn at the six joints dimOS reports, wrist and all, so it should
+  lie on the arm the camera sees; if it does not, the rig file is off. A
+  small dot in the arm's colour marks the point it is being sent to. With no
+  arms connected it is the planned pose, wrist at zero, gripper on the
+  sponge point. For the view only: the governor and the depth guard still
+  reason on the three-joint model, and `armmesh.py` stays empty.
 - **A target is a pose.** dimOS wants where the grasp frame is AND how it is
   turned. `arm_dimos` points the tool along the surface normal when the live
   view gives one, otherwise away from the shoulder. Position is weighted 4x

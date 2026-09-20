@@ -79,6 +79,7 @@ for p in (WT, HERE):
         sys.path.insert(0, p)
 
 import armmesh                                  # noqa: E402
+import armmesh_openyam as YAM
 import collide as COL
 import depth_guard as DG
 import control as CTL
@@ -188,7 +189,7 @@ YIELD_MAX_S = 2.0
 # off its line. The rub is what the real arms' servos can follow at the
 # acceleration arm_hw sets (a faster one is smoothed away by them, and
 # leaves the real arm off its checked path).
-SCRUB_V = 350.0           # mm/s along the stroke
+SCRUB_V = float(os.environ.get("SCRUB3D_SCRUB_MM_S", 350.0))   # mm/s along the stroke
 # Each pass scrubs every patch SWEEPS times before moving on: along it, then
 # across it, then along it again with the rows halfway between the first.
 # Once: the whole of what the arms reach is scrubbed sooner, pass after pass,
@@ -252,8 +253,71 @@ KEEP_AWAY_MM = 20.0
 # inside the stop line.
 D_BODY_MM = 5.0
 D_LIMB_MM = 5.0
+if getattr(K, "ARM_MODEL", "roarm") == "openyam":
+    # The OpenYAM's links are big, its wrist can put the real tool a hand's
+    # length off the three-joint model, and the first real run came far too
+    # close to the person. Keep its structure well off them.
+    # SCRUB3D_BODY_MM overrides it, asked for by name: with somebody sitting
+    # this close to the bases, an arm cannot fold around them at 60 and the
+    # governor refuses nearly every stroke. It is the one number that says how
+    # near the person a link may come, so it is set out loud, not buried.
+    D_BODY_MM = float(os.environ.get("SCRUB3D_BODY_MM", 60.0))
+    D_LIMB_MM = 25.0
 D_HOLD_MM = 45.0
 D_ESTOP_MM = 5.0
+
+# WHICH skin is scrubbed, chosen by whoever is running it.
+#   SCRUB3D_PARTS=arms      the person's arms only, not the torso
+#   SCRUB3D_SIDE_DEG=55     on a limb, only cells facing out sideways, within
+#                           this many degrees of straight out from the body
+# An arm on a plank beside the chair meets the person's arm from its OUTER side.
+# Left to itself the planner also takes the cells on the front and the back of
+# the limb, because the camera sees the front best, and the sponge then comes
+# at the arm from in front of it or reaches round behind it: from the chair
+# that reads as the robot missing the arm. From the side a straight wrist
+# puts the sponge's flat face square on the limb.
+WANT_PARTS = os.environ.get("SCRUB3D_PARTS", "all").strip().lower()
+WANT_SIDE_DEG = float(os.environ.get("SCRUB3D_SIDE_DEG", 0.0))
+#   SCRUB3D_FACE_DEG=50     each arm takes only skin that FACES IT: whose normal
+#                           points at that arm's shoulder, within this many degrees
+# This is the rule for a claw that is aimed square on. Square on to skin that
+# faces the arm costs the wrist nothing. Square on to skin that faces sideways,
+# from a base that stands 30 cm in front of it, is a quarter turn of the wrist:
+# aimed at the outer side of the person's arm, the right wrist sat at -1.65 rad
+# of a -1.69 stop, and past its stop dimOS drops the arm's power.
+WANT_FACE_DEG = float(os.environ.get("SCRUB3D_FACE_DEG", 0.0))
+# body.scrub_cells() part indices, in live_body.SCRUB_PARTS order:
+# 0 torso, 1 upper_arm_L, 2 forearm_L, 3 upper_arm_R, 4 forearm_R
+PART_TORSO, PARTS_LEFT, PARTS_RIGHT = 0, (1, 2), (3, 4)
+
+
+def shoulder_of(T_base):
+    """An arm's shoulder pivot in the world, from its base pose."""
+    return (np.asarray(T_base, float) @ np.r_[K.BASE_X_MM, 0.0, K.BASE_H_MM, 1.0])[:3]
+
+
+def wanted_cells(N, I, y_left=(0.0, 1.0, 0.0), P=None, shoulder=None):
+    """Cells the person running it asked for. -> (n,) bool
+
+    `y_left`: the world direction of the person's left, which is +y in the
+    live view's world. `P`, `shoulder`: the cells and one arm's shoulder in
+    the world, for the rule that an arm takes only skin that faces it."""
+    I = np.asarray(I)
+    ok = np.ones(len(I), bool)
+    if WANT_FACE_DEG > 0.0 and P is not None and shoulder is not None:
+        to_arm = np.asarray(shoulder, float) - np.asarray(P, float)
+        to_arm /= np.maximum(np.linalg.norm(to_arm, axis=1, keepdims=True), 1e-9)
+        ok &= np.einsum("ij,ij->i", np.asarray(N, float), to_arm) >= math.cos(math.radians(WANT_FACE_DEG))
+    if WANT_PARTS == "arms":
+        ok &= I != PART_TORSO
+    if WANT_SIDE_DEG > 0.0:
+        N = np.asarray(N, float)
+        out = N @ np.asarray(y_left, float)                  # + is toward their left
+        c = math.cos(math.radians(WANT_SIDE_DEG))
+        left, right = np.isin(I, PARTS_LEFT), np.isin(I, PARTS_RIGHT)
+        ok &= ~left | (out >= c)
+        ok &= ~right | (out <= -c)
+    return ok
 PRESS_MM = 3.0
 STANDOFF_MM = COL.R_SPONGE - PRESS_MM     # tool point above the skin
 # What an approach needs: a sponge-sized ball this far out along the normal,
@@ -264,18 +328,26 @@ CORRIDOR = (STANDOFF_MM + 10.0, COL.R_SPONGE)
 # real arms inside D_ESTOP_MM of each other, holds every arm. Skin counts as
 # scrubbed by a real sponge only where it reached it: its centre within
 # R_SPONGE of the skin under it, crediting what rub() credits there.
-REAL_BODY_MM = -15.0
+REAL_BODY_MM = float(os.environ.get("SCRUB3D_REAL_BODY_MM", -15.0))   # an arm that trails its
+# plan by more than this reads as deep whenever the plan moves along the skin
 # The depth guard (see the module notes).
 SLOW_BAND_MM = 25.0
-V_TOUCH = 80.0            # mm/s, the sponge closing on the person
-V_CLOSE = 120.0           # mm/s, the rest of the arm closing on them
+# SCRUB3D_TOUCH_MM_S sets what the sponge may do at the person, in mm/s; the
+# rest of the arm keeps its half again on top. Unset, these stay as chosen.
+V_TOUCH = float(os.environ.get("SCRUB3D_TOUCH_MM_S", 80.0))
+V_CLOSE = 1.5 * V_TOUCH   # mm/s, the rest of the arm closing on them
 A_BRAKE = 1000.0          # mm/s2, what the braking curve assumes an arm can shed
 MAX_PRESS_MM = 8.0
 MAX_LIFT_OUT_MM = 40.0    # the most a goal is moved out to keep to MAX_PRESS_MM
 PRESS_SLACK_MM = 1.0      # ...and how far past it a moved-out goal may still be
 NEAR_MM = 60.0
-V_NEAR = 200.0            # mm/s, the sponge off the skin, near the person
-V_NEAR_ARM = 250.0        # mm/s, the fastest point of the rest of the arm
+# SCRUB3D_NEAR_MM_S: how fast the sponge may go near the person while it is
+# off their skin; the rest of the arm keeps its quarter again on top. These are
+# speed limits, chosen numbers, and the only guards here that cost any speed:
+# measured with the rest in place, the arms were held 0% of a run and the plan
+# stood still 7 to 11% of it, but it topped out at exactly this 200.
+V_NEAR = float(os.environ.get("SCRUB3D_NEAR_MM_S", 200.0))
+V_NEAR_ARM = 1.25 * V_NEAR   # mm/s, the fastest point of the rest of the arm
 MAX_TOOL_V = 480.0        # mm/s: arm_hw's MAX_STEP_MM at its RATE_HZ
 RAW_MM = 0.0
 # No part of an arm may go this far into what the camera measured, whatever
@@ -319,6 +391,17 @@ LOST_S = 0.5
 LEAD_MM = 15.0
 LEAD_LATE_S = 0.1
 LEAD_WAIT_S = 1.0
+if getattr(K, "ARM_MODEL", "roarm") == "openyam":
+    # Measured on the OpenYAMs through dimOS over WiFi: the claw reads 16 mm
+    # from where it was sent at the median and 27 mm at the 90th percentile,
+    # standing still or moving, because the reading is a bridge poll, a network
+    # hop and a view frame old. Against 15 mm the plan was "waiting for the arm"
+    # more than half of every run and the arms crept, a step and a wait at a
+    # time (45 mm/s of plan where the strokes are paced for 350). The limit
+    # has to clear what the link alone makes of an arm that is keeping up.
+    LEAD_MM = float(os.environ.get("SCRUB3D_LEAD_MM", 45.0))
+    LEAD_LATE_S = 0.3
+    LEAD_WAIT_S = 0.4
 
 
 def allowed_close(gap, v_min):
@@ -1185,6 +1268,7 @@ class Arms:
         self.slowed = collections.Counter()
         self.lifted = collections.defaultdict(float)   # arm -> mm its last goal was moved out
         self.real_at, self.lead_since = {}, {}
+        self.real_q6 = {}                # arm -> all six real joints (dimOS), to draw
         self.plan_v = {}                 # arm -> how fast its sponge moves, mm/s
         self.waited_real = collections.Counter()
         self.checker = self.checked = self.checked_at = None
@@ -1261,6 +1345,8 @@ class Arms:
             c = CTL.CoverageController(Pw[m], Nw[m], A[m], self.layout[a],
                                        standoff=STANDOFF_MM)
             c.margin[~ok[m]] = 0.0            # not now: see feasible_now
+            c.margin[~wanted_cells(Nw[m], np.asarray(Iw)[m], P=Pw[m],
+                                   shoulder=shoulder_of(self.layout[a]))] = 0.0
             self.ctl[a] = (c, m)
             self.cell_region[a] = np.asarray(Iw)[m]
             self.cell_chart[a] = chart[m]
@@ -1714,6 +1800,8 @@ class Arms:
         for a, (c, m) in self.ctl.items():
             c.refresh(Pl[m], Nl[m])
             c.margin[~self.safe_now[m] | self.still_block[m] | untrusted[m]] = 0.0
+            c.margin[~wanted_cells(Nl[m], Il[m], P=Pl[m],
+                                   shoulder=shoulder_of(self.layout[a]))] = 0.0
             self.seen_ok[a] |= c.margin > 0.0
             seen = self.cell_seen[a]
             seen.append((t, c.pts))
@@ -3207,22 +3295,34 @@ class Arms:
                 rr.log(f"world/arms/arm_{a}/links/{name}",
                        rr.Mesh3D(vertex_positions=V, triangle_indices=F,
                                  albedo_factor=VIZ.ARM_COLOURS[a % 4]), static=True)
+            if armmesh.OPENYAM:
+                # The OpenYAM as it is built (armmesh_openyam.py). Its faces
+                # carry their normals, so the viewer lights it.
+                for name, (V, F, N) in YAM.meshes().items():
+                    rr.log(f"world/arms/arm_{a}/links/{name}",
+                           rr.Mesh3D(vertex_positions=V, triangle_indices=F,
+                                     vertex_normals=N,
+                                     albedo_factor=YAM.colour(name, VIZ.ARM_COLOURS[a % 4])),
+                           static=True)
 
     def log(self):
         if self.layout is None:
             return
         for a, T in enumerate(self.layout):
-            tf = armmesh.link_transforms(*self.joints[a], T_world_base=T)
-            for name in armmesh.LINKS:
-                rr.log(f"world/arms/arm_{a}/links/{name}", VIZ._tf(tf[name]),
-                       static=True)
             col = VIZ.ARM_COLOURS[a % 4]
-            core = np.clip(np.asarray(col, float) * 1.4 + 40.0, 0, 255).astype(np.uint8)
-            rr.log(f"world/arms/arm_{a}/sponge",
-                   rr.Points3D([self.sponge[a], self.sponge[a]],
-                               colors=[np.asarray(col, np.uint8), core],
-                               radii=[COL.R_SPONGE, 0.45 * COL.R_SPONGE]),
-                   static=True)
+            if armmesh.OPENYAM:
+                self._log_openyam(a, T, col)
+            else:
+                tf = armmesh.link_transforms(*self.joints[a], T_world_base=T)
+                for name in armmesh.LINKS:
+                    rr.log(f"world/arms/arm_{a}/links/{name}", VIZ._tf(tf[name]),
+                           static=True)
+                core = np.clip(np.asarray(col, float) * 1.4 + 40.0, 0, 255).astype(np.uint8)
+                rr.log(f"world/arms/arm_{a}/sponge",
+                       rr.Points3D([self.sponge[a], self.sponge[a]],
+                                   colors=[np.asarray(col, np.uint8), core],
+                                   radii=[COL.R_SPONGE, 0.45 * COL.R_SPONGE]),
+                       static=True)
             strips = VIZ._strips(self.trails[a])
             if strips:
                 # The newest stroke brightest and thickest, the older ones
@@ -3239,6 +3339,21 @@ class Arms:
             else:
                 rr.log(f"world/arms/arm_{a}/track", rr.Clear(recursive=False),
                        static=True)
+
+    def _log_openyam(self, a, T, col):
+        """One OpenYAM, as built. Where dimOS reports a real arm's six joints
+        it is drawn there, wrist and all; a planned arm is its three joints
+        with the wrist at zero, which puts the gripper on the sponge point.
+        The gripper stands for the sponge; only a real arm, which trails its
+        plan, has the planned point marked as well."""
+        real = self.real_q6.get(a)
+        tf = YAM.link_transforms(real or self.joints[a], T_world_base=T)
+        for name in YAM.links():
+            rr.log(f"world/arms/arm_{a}/links/{name}", VIZ._tf(tf[name]), static=True)
+        if real:
+            rr.log(f"world/arms/arm_{a}/sponge",
+                   rr.Points3D([self.sponge[a]], colors=[np.asarray(col, np.uint8)],
+                               radii=[0.25 * COL.R_SPONGE]), static=True)
 
     def clear(self, was=0):
         """Take the planned state off the screen, and arms the rig no longer

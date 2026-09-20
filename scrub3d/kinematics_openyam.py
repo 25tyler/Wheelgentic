@@ -146,6 +146,16 @@ def link_points_many(J):
     return out
 
 
+# What the arm stands on. These arms are clamped to a plank across a
+# wheelchair, and the thighs of the person in it pass under that plank. A tool
+# point below the base plane is inside the plank, or down beside it against
+# their leg. The governor's own list of places to wait runs to 200 mm BELOW the
+# base, which is fine for an arm on a post; here it sent a claw 75 mm under the
+# top of the plank and into a thigh, where the camera read it 16 mm inside the
+# leg. Nothing is proposed below this, for a stroke, a wait or a way between.
+FLOOR_Z_MM = float(os.environ.get("SCRUB3D_ARM_FLOOR_MM", 70.0))
+
+
 def within_limits(j0, j1, j2):
     return (BASE_MIN_RAD <= j0 <= BASE_MAX_RAD
             and SHOULDER_MIN_RAD <= j1 <= SHOULDER_MAX_RAD
@@ -173,6 +183,8 @@ def ik(x, y, z, elbow_branch=+1):
     """Tool point (mm) -> (j0, j1, j2) rad, or None if unreachable or
     outside the joint limits. Position only, elbow up, wrist at zero."""
     x, y, z = float(x), float(y), float(z)
+    if z < FLOOR_Z_MM:                         # the plank, and the legs under it
+        return None
     u = math.hypot(x, y)
     j0 = math.atan2(YAW_SIGN * y, x) if u > 1e-9 else 0.0
     if j0 < BASE_MIN_RAD:                      # -150 deg limit: try the far way
@@ -224,7 +236,7 @@ def reach_margin(x, y, z, elbow_branch=+1):
     already out). Reach only; the joint limits are ik()'s business."""
     u = math.hypot(float(x), float(y))
     d = math.hypot(u - BASE_X_MM, float(z) - BASE_H_MM)
-    return float(min(REACH_MAX - d, d - REACH_MIN))
+    return float(min(REACH_MAX - d, d - REACH_MIN, float(z) - FLOOR_Z_MM))
 
 
 def ik_many(x, y, z, elbow_branch=+1):
@@ -248,7 +260,7 @@ def ik_many(x, y, z, elbow_branch=+1):
     lim = ((j0 >= BASE_MIN_RAD) & (j0 <= BASE_MAX_RAD)
            & (j1 >= SHOULDER_MIN_RAD) & (j1 <= SHOULDER_MAX_RAD)
            & (j2 >= ELBOW_MIN_RAD) & (j2 <= ELBOW_MAX_RAD))
-    ok = inr & lim
+    ok = inr & lim & (z >= FLOOR_Z_MM)
     J[:, 0], J[:, 1], J[:, 2] = j0, j1, j2
     J[~ok] = 0.0
     return J, ok
@@ -258,7 +270,7 @@ def reach_margin_many(x, y, z, elbow_branch=+1):
     x, y, z = (np.asarray(v, float).ravel() for v in (x, y, z))
     u = np.hypot(x, y)
     d = np.hypot(u - BASE_X_MM, z - BASE_H_MM)
-    return np.minimum(REACH_MAX - d, d - REACH_MIN)
+    return np.minimum(np.minimum(REACH_MAX - d, d - REACH_MIN), z - FLOOR_Z_MM)
 
 
 # Everything kinematics.py exports when SCRUB3D_ARM=openyam.

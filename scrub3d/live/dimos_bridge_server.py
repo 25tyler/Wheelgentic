@@ -74,7 +74,7 @@ STATE_HZ = 20.0
 # --- the dimOS stack ----------------------------------------------------------
 
 def build_blueprint(left_can_port=None, right_can_port=None, viser=True,
-                    max_joint_velocity_rad_s=1.0):
+                    max_joint_velocity_rad_s=1.0, orientation_cost=0.0):
     """The dual OpenYAM stack: coordinator with a cartesian target task per arm,
     a gripper task per arm, the trajectory task the planner uses, and the
     manipulation module (IK, planning, the Viser view). Mock hardware when no
@@ -94,11 +94,23 @@ def build_blueprint(left_can_port=None, right_can_port=None, viser=True,
     # joint_limit_posture_margin 0.5 (dimOS's teleop uses 0.3): the wrist was
     # being driven to its limit, sagging past it under load, and tripping the
     # adapter's feedback fault, which drops torque and ends the session.
-    # orientation_cost 0: position only. Holding the claw's WORLD orientation
-    # while the base yaws a quarter turn made the wrist do all the turning, and
-    # it ran to its stop within a minute (-1.66 of -1.69 rad). The sponge goes
-    # where it is sent and the wrist stays near where the park left it.
-    pink = PinkKinematicsConfig(dt=0.01, position_cost=8.0, orientation_cost=0.0,
+    # orientation_cost 0: position only, and not for want of trying. At 2 the
+    # claw held its WORLD orientation through a quarter turn of the base by
+    # making the wrist do all the turning, and it ran to its stop within a
+    # minute (-1.66 of -1.69 rad). At 0.6, with the joint limit margin at 0.5,
+    # the QP had no feasible solution at all and the left arm took no commands
+    # for a whole run. So the claw is not aimed: the sponge goes where it is
+    # sent and the wrist stays near where the park left it, which means the
+    # claw can sit pointing back at the camera. Aiming it wants room at the
+    # limits that this arm, on this plank, does not have.
+    # --orientation-cost aims the claw (0, the default, leaves it unaimed). It
+    # is worth trying again now for a reason: when it froze an arm the wrists
+    # were bent however the last run left them and the targets were on the
+    # front and the back of the limb, which a claw reaching in from the side
+    # cannot face. The live view now sends only the limb's outer side, from
+    # straight wrists, and turns its request toward the skin a little at a time.
+    pink = PinkKinematicsConfig(dt=0.01, position_cost=8.0,
+                                orientation_cost=float(orientation_cost),
                                 posture_cost=0.05, joint_limit_posture_margin=0.5,
                                 lm_damping=0.01, gain=1.0)
     tasks = []
@@ -134,7 +146,7 @@ class Stack:
     """dimOS, running in this process or reached over its bus."""
 
     def __init__(self, attach=False, left_can_port=None, right_can_port=None,
-                 viser=True, max_joint_velocity_rad_s=1.0):
+                 viser=True, max_joint_velocity_rad_s=1.0, orientation_cost=0.0):
         from dimos.porcelain.dimos import Dimos
         self.mock = left_can_port is None and right_can_port is None
         if attach:
@@ -143,7 +155,7 @@ class Stack:
         else:
             self.app = Dimos(viewer="none")      # no Rerun window for a bridge
             self.app.run(build_blueprint(left_can_port, right_can_port, viser,
-                                         max_joint_velocity_rad_s))
+                                         max_joint_velocity_rad_s, orientation_cost))
         from dimos.manipulation.manipulation_spec import ManipulationSpec
         self.rpc = self.app.find_module_by_spec(ManipulationSpec)
         self.groups = {}
@@ -213,6 +225,13 @@ class Stack:
             targets[info.id] = JointState(name=names, position=q)
         plan = self.rpc.plan_to_joints(targets, speed_scale=float(speed_scale))
         if not plan.succeeded or plan.plan is None:
+            # A plan that was refused is an answer to a question, not a fault.
+            # Left alone, dimOS keeps reporting it as its error, and a live
+            # view that reads that as "the arms have faulted" stops them both.
+            try:
+                self.rpc.reset()
+            except Exception:                                # noqa: BLE001
+                pass
             return {"ok": False, "error": f"plan {plan.status.name}: {plan.message}"}
         r = self.rpc.execute(blocking=False, plan_id=plan.plan.plan_id)
         if close:
@@ -388,6 +407,9 @@ def main():
     ap.add_argument("--no-viser", action="store_true")
     ap.add_argument("--max-joint-velocity", type=float, default=1.0,
                     help="rad/s cap dimOS applies to every joint (default 1.0)")
+    ap.add_argument("--orientation-cost", type=float, default=0.0,
+                    help="how hard dimOS tries to AIM the claw, against 8 for where it is "
+                         "(default 0: position only; 0.3 to 1 aims it)")
     a = ap.parse_args()
     if (a.left_can_port is None) != (a.right_can_port is None):
         raise SystemExit("give both --left-can-port and --right-can-port, or neither (mock)")
@@ -396,7 +418,8 @@ def main():
     bridge = Bridge(a.host, a.port)              # the port first: it is the lock
     stack = Stack(attach=a.attach, left_can_port=a.left_can_port,
                   right_can_port=a.right_can_port, viser=not a.no_viser,
-                  max_joint_velocity_rad_s=a.max_joint_velocity)
+                  max_joint_velocity_rad_s=a.max_joint_velocity,
+                  orientation_cost=a.orientation_cost)
     bridge.attach(stack)
     try:
         bridge.serve()

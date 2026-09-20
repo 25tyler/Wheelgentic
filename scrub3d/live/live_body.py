@@ -762,6 +762,14 @@ class Body:
     def build(self, D):
         v = {k: m.value() for k, m in D.items()}
         lf, tf = AN.ADULT["limb_flatten"], AN.ADULT["torso_flatten"]
+        # SCRUB3D_LIMB_TRIM_MM comes off the measured arm widths. A sleeve and
+        # the soft edge of a depth silhouette both read as arm, so the model's
+        # arm comes out fatter than the one inside it and the sponge rides
+        # that far off the skin. Set by eye, by whoever is watching it miss.
+        trim = float(os.environ.get("SCRUB3D_LIMB_TRIM_MM", 0.0))
+        if trim:
+            for k, least in (("upper_arm_w", 60.0), ("forearm_w", 50.0), ("wrist_w", 38.0)):
+                v[k] = max(least, v[k] - trim)
         # An upper arm beside the torso is rarely measured cleanly; the
         # forearm nearly always is, and bounds it.
         v["upper_arm_w"] = float(np.clip(v["upper_arm_w"], 0.95 * v["forearm_w"],
@@ -2119,7 +2127,8 @@ def main():
                     metavar="fake",
                     help="drive the real arms named in arm_ports.json (see "
                          "arm_hw.py and ARMS.md); '--drive fake' drives "
-                         "simulated boards instead")
+                         "simulated boards instead; '--drive dimos' drives the "
+                         "OpenYAM pair through dimOS (DIMOS.md)")
     a = ap.parse_args()
 
     intr, frames = (replay_source(a.replay, loop=not a.once, fps=a.replay_fps)
@@ -2129,7 +2138,7 @@ def main():
     if a.rig and not a.no_arms and not a.project_rig:
         watch = RigWatch(a.rig)
         with open(a.rig, encoding="utf-8") as f:
-            arms = Arms(rel=json.load(f)["arms"])
+            arms = Arms(rel=nudged(json.load(f)["arms"]))
     elif not a.no_arms:
         arms = Arms(layout=rigconfig.load().layout())
     if arms is not None:
@@ -2139,9 +2148,11 @@ def main():
         if arms is None or arms.rel is None:
             raise SystemExit("--drive needs a seat-relative rig (--rig)")
         hw = connect_arms(arms, a.drive)
-        if a.drive == "fake" or a.replay:
+        if a.drive in ("fake", "dimos") or a.replay:
             print("  camera check of the real arms: off ("
-                  + ("simulated boards" if a.drive == "fake" else "a recording")
+                  + ("simulated boards" if a.drive == "fake"
+                     else "OpenYAMs, which the camera check does not know"
+                     if a.drive == "dimos" else "a recording")
                   + " cannot be seen)", flush=True)
         else:
             import arm_sight
@@ -2391,11 +2402,50 @@ def main():
             rr.disconnect()
 
 
+def nudged(rel):
+    """The rig, moved by hand from the command line. -> rel
+
+        SCRUB3D_LEFT_BACK_MM=40     the LEFT arm's sponge lands 40 mm further back
+        SCRUB3D_RIGHT_BACK_MM=-30   the RIGHT arm's, 30 mm further forward
+        SCRUB3D_LEFT_IN_MM=40       the LEFT arm's sponge lands 40 mm further IN,
+                                    toward the person's middle (it was stopping short)
+        SCRUB3D_RIGHT_IN_MM=-20     the RIGHT arm's, 20 mm further out
+
+    Back is away from the camera, toward the person. The bases are placed from
+    the seat point, which lands in a different place for each body and each way
+    of sitting, so a sponge that touched one person comes down in front of the
+    next one's arm or behind it. Whoever is watching can see by how much; the
+    software cannot. (An arm reaches from where it BELIEVES its base is, so a
+    base put further ahead in the file makes the real sponge land further back.)"""
+    for r in rel:
+        side = str(r.get("side", "")).upper()
+        back = float(os.environ.get(f"SCRUB3D_{side}_BACK_MM", 0.0) or 0.0)
+        if back:
+            r["x_from_seat_mm"] = float(r["x_from_seat_mm"]) + back
+            print(f"  {side.lower()} arm nudged {back:+.0f} mm back by SCRUB3D_{side}_BACK_MM", flush=True)
+        # In is toward the person's middle, which is -y for the arm on their
+        # left and +y for the one on their right. The same rule as above: the
+        # sponge goes IN when the file puts the base further OUT.
+        inn = float(os.environ.get(f"SCRUB3D_{side}_IN_MM", 0.0) or 0.0)
+        if inn:
+            y = float(r["y_from_seat_mm"])
+            r["y_from_seat_mm"] = y + (inn if y >= 0.0 else -inn)
+            print(f"  {side.lower()} arm nudged {inn:+.0f} mm in by SCRUB3D_{side}_IN_MM", flush=True)
+    return rel
+
+
 def connect_arms(arms, how):
     """The real arms for --drive (or simulated boards). -> arm_hw.Hardware"""
     import arm_hw
     n = len(arms.rel)
-    if how == "fake":
+    if how == "dimos":
+        # The OpenYAM pair through dimOS: arm_dimos.py, DIMOS.md.
+        import arm_dimos
+        try:
+            hw = arm_dimos.Hardware.connect()
+        except arm_dimos.ArmError as exc:
+            raise SystemExit(f"the OpenYAM arms could not be started: {exc}")
+    elif how == "fake":
         hw = arm_hw.Hardware.fake(n)
     else:
         try:
@@ -2541,11 +2591,30 @@ def drive_arms(arms, hw, view):
     approved = {a: arms.sponge[a].copy() for a in range(n)}
     on_skin = {a: arms.mode.get(a) == "working" and a in arms.tools
                and bool(arms.tools[a].contact) for a in range(n)}
-    why = hw.update(approved, stop=arms.estopped, on_skin=on_skin)
+    # Which way the sponge faces, taken from the skin it is aimed at. Without
+    # this a driver has nothing to aim the claw with and leaves it wherever the
+    # solver put it, which on the OpenYAMs was pointing back at the camera.
+    normals = {}
+    for a in range(n):
+        tl = arms.tools.get(a)
+        if tl is None or tl.c is None or not len(tl.c.pts):
+            continue
+        d = tl.c.pts - np.asarray(approved[a], float)
+        normals[a] = tl.c.nrm[int(np.argmin(np.einsum("ij,ij->i", d, d)))]
+    why = hw.update(approved, stop=arms.estopped, on_skin=on_skin, normals=normals)
     real = {a: arm.actual_world() for a, arm in hw.arms.items()}
+    # The OpenYAMs report all six joints: the view draws the real arm there.
+    arms.real_q6 = {a: arm.real_joints6() for a, arm in hw.arms.items()
+                    if hasattr(arm, "real_joints6")}
     bad = arms.real_frame(hw.joints(), real)
     if bad and not why:
-        hw.hold_all(bad)
+        if hasattr(hw, "back_off"):
+            # "red: the real arm is ..." names the arm by its colour.
+            who = bad.split(":", 1)[0].strip()
+            names = ("red", "blue", "green", "orange")
+            hw.back_off(bad, names.index(who) if who in names else None)
+        else:
+            hw.hold_all(bad)
         why = hw.reason
     log = hw.drive_log
     if log is not None:
@@ -2563,12 +2632,24 @@ def drive_arms(arms, hw, view):
                                         / reach,
                                         "real": sum(f * r for f, _o, r in got.values())
                                         / reach})
-    if why and not arms.estopped:
+    if why and getattr(hw, "recovers", False) and not getattr(hw, "sticky", False):
+        # A driver that can let go again (arm_dimos): the arms pause while the
+        # reason stands and go on when it has passed. Said once each way.
+        if not getattr(arms, "hw_paused", False):
+            arms.hw_paused = True
+            arms.hw_note_was = arms.hw_note
+            arms.hw_note = f"**The real arms are pausing:** {why}."
+            print(f"  arms pausing: {why}", flush=True)
+    elif why and not arms.estopped:
         arms.estopped = True
         arms.status = f"STOPPED: {why}"
         arms.hw_note = (f"**The real arms are HOLDING where they are:** {why}. "
                         f"Restart the live view to go on.")
         print(f"  ARMS HOLDING: {why}", flush=True)
+    elif not why and getattr(arms, "hw_paused", False):
+        arms.hw_paused = False
+        arms.hw_note = getattr(arms, "hw_note_was", "")
+        print("  arms going on", flush=True)
     if view:
         pts = [p for p in real.values() if p is not None]
         if pts:

@@ -15,27 +15,7 @@ import numpy as np
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-# --help AND A MISSING ARGUMENT BOTH HAVE TO ANSWER. This read sys.argv[1]
-# straight, so running the file with no arguments raised IndexError and
-# running it with --help fell through to replay_source("--help") and died
-# inside cv2 with a stack trace about a missing intr.json. Neither told
-# anybody what the tool wants, which is the whole reason a tool nobody can
-# start looks like a tool that does not work. The docstring above is the
-# usage; print it rather than keeping a second copy that can drift.
-if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
-    print(__doc__)
-    raise SystemExit(0 if len(sys.argv) > 1 else 2)
-
 folder = sys.argv[1]
-if not os.path.isdir(folder):
-    # An RGB-D recording folder, not a file. Say which one is missing: these
-    # live in scrub3d/data/live_rec_* and a fresh checkout has none, so "no
-    # such directory" is the single likeliest thing to hit here.
-    raise SystemExit(f"no recording directory at {folder!r}.\n"
-                     f"  A recording is a folder of <name>_c.png / <name>_d.png "
-                     f"frames plus intr.json,\n"
-                     f"  written by scrub3d/live/live_body.py --dump. "
-                     f"There are none in this checkout.")
 rig = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, "live_rig.json")
 rig = None if rig == "-" else rig
 loops = int(sys.argv[3]) if len(sys.argv) > 3 else 1

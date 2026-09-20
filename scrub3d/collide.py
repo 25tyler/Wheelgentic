@@ -80,6 +80,12 @@ R_FORE = 30.0        # elbow -> tool point (measured 28.3; kept conservative)
 R_SPONGE = 40.0      # the sponge itself. A SPHERE, see the plan: the arm has
                      # no commandable orientation, so a ball has nothing to
                      # get wrong. Set to the ball's actual radius.
+# A sponge that is NOT a ball: SCRUB3D_SPONGE_R_MM is how far it reaches from
+# the grip point, whichever way the claw happens to be turned. The OpenYAMs hold
+# a block about 90 x 60 x 40 mm crosswise in the claw: 30 mm out at its flat
+# face, 45 along its long edge, 64 at a corner. At 40 the grip point was held
+# 37 mm off the skin and the block was pushed 1 to 3 cm into the person.
+R_SPONGE = float(__import__("os").environ.get("SCRUB3D_SPONGE_R_MM", R_SPONGE))
 R_EOAT = 69.0        # the EoAT jaw, as a sphere about its own pivot.
 #
 # THIS TERM WAS MISSING ENTIRELY, and it is the worst of the three errors on
