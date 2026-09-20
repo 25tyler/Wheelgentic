@@ -144,7 +144,12 @@ EVENT = {"seq": 0, "mode": "live", "limb": "forearm_L", "t": 0.0,
          # not change when they lean out of frame, and the last measurement
          # of THIS person stays true until somebody else sits down. See
          # _sample_body() for why it reports its own confidence.
-         "body": None}
+         "body": None,
+         # WHERE THE CHAIR IS, from the person's measured hips. Sticky like
+         # "body" and for the same reason: a chair does not move when its
+         # occupant leans out of frame. "placed", never "measured" -- the
+         # POSITION is measured, the chair's own dimensions are not.
+         "chair": None}
 LOCK = threading.Lock()
 RUNNING = True
 REC_FH = None
@@ -1823,6 +1828,32 @@ def vision_loop(arm, args):
         # generic-human estimate can never be laundered into a measurement.
         # Published sticky: proportions do not change when somebody leans
         # out of frame, unlike the pose above.
+        # WHERE THE CHAIR IS, from where the person's hips are. His live
+        # view places a seat this way (live_body.Body.place_chair takes the
+        # seat from the body's own hips) and ours drew a chair at a typed
+        # 0.48m whoever was sitting in it -- which also placed the ARM
+        # MOUNTS, because the rig file is seat-relative.
+        #
+        # PLACED, NOT MEASURED, and the key says so. The hip height is
+        # measured; the chair's own dimensions are not, and nothing anybody
+        # has written measures a wheelchair's frame.
+        _seat = None
+        _wm0 = getattr(feed, "world_mm", None)
+        _meas0 = getattr(feed, "world_measured", set())
+        if _wm0 and "l_hip" in _meas0 and "r_hip" in _meas0:
+            try:
+                import numpy as _np
+                mid = (_np.asarray(_wm0["l_hip"], float)
+                       + _np.asarray(_wm0["r_hip"], float)) / 2.0
+                if _np.all(_np.isfinite(mid)):
+                    _seat = {"src": "placed",
+                             "seat_mm": [round(float(v), 1) for v in mid]}
+            except Exception:                                # noqa: BLE001
+                _seat = None
+        if _seat is not None:
+            with LOCK:
+                EVENT["chair"] = _seat
+
         _wm = getattr(feed, "world_mm", None)
         if _wm:
             _measure_body(_wm, getattr(feed, "world_measured", set()))
@@ -2683,7 +2714,7 @@ def main():
     # wire stays "commanded", which is what the projector does on a laptop.
     global _ARMLINK
     try:
-        from armlink import ArmLink
+        from armbridge import ArmLink
         _ARMLINK = ArmLink()
         if _ARMLINK.endpoint is None:
             _ARMLINK = None

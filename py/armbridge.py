@@ -1,4 +1,12 @@
-"""py/armlink.py -- where the real arms ARE, read from the bridge.
+"""py/armbridge.py -- where the real arms ARE, read from the bridge.
+
+NAMED armbridge, NOT armlink, BECAUSE scrub3d/armlink.py ALREADY EXISTS.
+py/ and scrub3d/ are both on sys.path in the running backend, and that one
+won: the import here resolved to a module with no ArmLink in it, the
+try/except swallowed it as "no bridge reader", and every joint angle stayed
+"commanded" while a reachable bridge sat there answering. It cost a whole
+debugging pass, and the only symptom was a line saying the thing had not
+started.
 
 WHAT THIS IS
 ------------

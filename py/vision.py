@@ -546,8 +546,20 @@ class PoseFeed:
     # and wrist per side is the arm the machine is working on; a knee or a
     # nose is not part of that claim, and this rides a 15Hz broadcast whose
     # whole contract is staying small (scrubbot.py:78).
+    # THE HIPS ARE HERE BECAUSE THE SEAT IS. Six arm joints are what the
+    # machine works on, and the plan asks for those; the hips are what a
+    # chair is under. _publish_world already derives mid_hip and nothing
+    # carried it, so the page placed its chair -- and therefore its ARM
+    # MOUNTS, which are seat-relative -- from a typed 0.48m constant while
+    # a measured hip height sat unused one process away.
+    #
+    # Two more points on a payload of six is a rounding error against the
+    # 15Hz budget, and it is the difference between a chair drawn where
+    # this person is sitting and a chair drawn where an average person
+    # would be.
     LIMB_JOINTS = ("l_shoulder", "l_elbow", "l_wrist",
-                   "r_shoulder", "r_elbow", "r_wrist")
+                   "r_shoulder", "r_elbow", "r_wrist",
+                   "l_hip", "r_hip")
 
     def limb_event(self):
         """The person's arm joints, JSON-safe, for the websocket. -> {} or dict.
