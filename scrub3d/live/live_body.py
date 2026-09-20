@@ -1918,7 +1918,7 @@ def diag(live, depth, live_mesh, n, folder):
 SHARE_PATH = os.environ.get("SCRUB3D_DIMS", "/tmp/wheelgentic-dims.json")
 
 
-def _share_dims(D, seat, sitting_height):
+def _share_dims(D, seat, sitting_height, joints=None):
     """Write the measured dimensions where another process can read them.
 
     ATOMIC, because a reader polling this will otherwise catch a half-written
@@ -1940,6 +1940,23 @@ def _share_dims(D, seat, sitting_height):
                # measurement and a reader has to be able to tell.
                "mm": {k: round(float(m.value()), 1) for k, m in D.items()},
                "n": {k: int(m.n) for k, m in D.items()}}
+        # For the cartoon on the website (carebot.py relays these on the
+        # websocket web/main.js listens to): the thirteen dimensions as
+        # scene_out words them, and the six arm joints as posed, world mm.
+        try:
+            from scene_out import body_measurements
+            out["body"] = body_measurements(
+                D, circ_of=circ_of, limb_p=LIMB_P, torso_p=TORSO_P,
+                limb_flatten=AN.ADULT["limb_flatten"],
+                torso_flatten=AN.ADULT["torso_flatten"])
+        except Exception:                                    # noqa: BLE001
+            pass
+        names = [f"{s_}_{j}" for s_ in ("l", "r") for j in ("shoulder", "elbow", "wrist")]
+        got = {k: [round(float(v), 1) for v in joints[k]] for k in names
+               if joints is not None and k in joints}
+        if got:
+            out["limbs"] = {"src": "depth_measured", "mm": got, "measured": len(got),
+                            "total": len(names), "measured_names": sorted(got)}
         tmp = SHARE_PATH + ".part"
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(out, fh)
@@ -2392,7 +2409,7 @@ def main():
                 # and a reader that blocks or a port that is taken cannot be
                 # allowed to matter here. A reader either finds the file or
                 # does not.
-                _share_dims(D, live.seat, body.sitting_height)
+                _share_dims(D, live.seat, body.sitting_height, body.joints)
     finally:
         if hw is not None:
             missed = hw.close()

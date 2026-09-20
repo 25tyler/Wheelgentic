@@ -13,7 +13,8 @@ const WORDS = {
 };
 const esc = text => String(text).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-export function mountRobot(root, { fetchFn = (...a) => fetch(...a), every = 1000 } = {}) {
+const SCENES = { showering: '?view=bathe', eating: '?view=eat', take_meds: '?view=meds' };   // web/main.js VIEWS
+export function mountRobot(root, { fetchFn = (...a) => fetch(...a), every = 1000, onDone = null } = {}) {
   if (!root) return { dispose() {} };
   root.innerHTML = `
     <div class="robot-card">
@@ -26,7 +27,11 @@ export function mountRobot(root, { fetchFn = (...a) => fetch(...a), every = 1000
       </div>
     </div>`;
   const $ = id => root.querySelector(id);
-  let disposed = false, shown = '', timer = null;
+  let disposed = false, shown = '', timer = null, running = null;
+  // In the split view (web/compare.html) the 3D render already fills the right half and the
+  // cartoon opens in Tyler's own window over this page: showing both again here would be twice.
+  const framed = (() => { try { return window.self !== window.top; } catch { return true; } })();
+  const BUTTON = { showering: 'bathe', eating: 'eat', take_meds: 'meds' };
   async function poll() {
     if (disposed) return;
     let s;
@@ -38,12 +43,22 @@ export function mountRobot(root, { fetchFn = (...a) => fetch(...a), every = 1000
     $('#robot-said').textContent = (s.said || []).at(-1) || '';
     $('#robot-dot').className = 'live-dot robot-' + (s.state || 'unreachable');
     $('#robot-stop').hidden = !['showering', 'drinking'].includes(s.state);
-    const views = s.views && s.views.cartoon ? s.views : null;
-    const key = views ? views.cartoon + views.rerun : '';
-    if (key !== shown) {                       // set once: a reload would restart the camera
+    // A task that was running and no longer is has finished: the page logs it.
+    if (['showering', 'drinking'].includes(s.state) && !running) {
+      running = { task: s.task, at: Date.now() };
+      // Asked for by voice: open the cartoon on that scene, as a press of the care button does.
+      if (framed) document.querySelector(`.main-action[data-action="${BUTTON[s.task]}"]`)?.click();
+    }
+    else if (running && s.state === 'idle') { const was = running; running = null; onDone?.(was.task, (Date.now() - was.at) / 1000); }
+    const views = !framed && s.views && s.views.cartoon ? s.views : null;
+    // The cartoon shows the scene of what the arms are doing: said aloud or not, it follows.
+    const scene = views ? views.cartoon + (SCENES[running?.task] || '') : '';
+    const key = views ? scene + views.rerun : '';
+    if (key !== shown) {                       // only on a change: a reload restarts its camera
+      const rerunWas = $('#robot-rerun').getAttribute('src');
       shown = key;
       $('#robot-views').hidden = !views;
-      if (views) { $('#robot-cartoon').src = views.cartoon; $('#robot-rerun').src = views.rerun; }
+      if (views) { $('#robot-cartoon').src = scene; if (rerunWas !== views.rerun) $('#robot-rerun').src = views.rerun; }
     }
     timer = setTimeout(poll, every);
   }

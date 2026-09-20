@@ -59,6 +59,8 @@ S3D = os.path.dirname(HERE)
 REPO = os.path.dirname(S3D)
 LOGS = os.path.join(HERE, "drive_logs")
 STOP_FILE = os.path.join(LOGS, "scrub.stop")
+WATCH_STOP = os.path.join(LOGS, "watch.stop")
+DIMS_FILE = os.path.join(LOGS, "dims.json")            # live_body.py's _share_dims writes it
 KEYS_FILE = os.path.join(LOGS, "drink.keys")          # drink.py's Keys._tail reads it
 SETTINGS = os.path.join(HERE, "run_openyam.ps1")      # the scrub's numbers, kept in one place
 RIG = os.path.join(HERE, "live_rig_openyam.json")
@@ -68,6 +70,9 @@ if not os.path.isdir(RECORDING):     # recordings are pictures of a person, neve
                              "live_rec_20260917f300")      # ... so --dry borrows the old repo's
 
 PORT, PAGE_PORT, RERUN_PORT, RERUN_WEB_PORT = 8770, 8000, 9876, 9090
+WS_PORT = 8765                        # web/main.js connects here: it is written into that file
+PHASES = {"idle": "IDLE", "showering": "SCRUB", "drinking": "APPROACH", "stopping": "RETREAT",
+          "parking": "RETREAT"}
 SCRUB = ("showering",)
 DRINK = ("eating", "take_meds")       # one motion for all of them: the bottle to the mouth
 
@@ -97,7 +102,35 @@ class Bot:
         self.said = collections.deque(maxlen=12)       # the task's last lines
         self.seen = collections.OrderedDict()          # command_id -> reply (idempotency)
         self.since = time.time()
+        self.watch = None                              # the live 3D render, between tasks
         os.makedirs(LOGS, exist_ok=True)
+
+    # --- the live 3D render, always on -----------------------------------------
+    def start_watch(self):
+        """live_body.py with no arms: the sitter as the depth camera sees them,
+        in the 3D view, whenever no scrub is running (a scrub is the same view
+        WITH the arms, and there is one camera, so they take turns). The drink
+        uses no camera and runs alongside it."""
+        if self.a.no_watch or (self.watch is not None and self.watch.poll() is None):
+            return
+        if os.path.exists(WATCH_STOP):
+            os.remove(WATCH_STOP)
+        cmd, env = self._command("showering")
+        cmd = [c for c in cmd if c not in ("--drive", "dimos")] + ["--no-arms"]
+        env["SCRUB3D_STOP_FILE"] = WATCH_STOP
+        self.watch = subprocess.Popen(cmd, cwd=REPO, env=env, stdin=subprocess.DEVNULL,
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def stop_watch(self):
+        w, self.watch = self.watch, None
+        if w is None or w.poll() is not None:
+            return
+        open(WATCH_STOP, "w").close()
+        try:
+            w.wait(timeout=12.0)
+        except subprocess.TimeoutExpired:
+            w.terminate()
+            w.wait(timeout=5.0)
 
     # --- the wire -------------------------------------------------------------
     def handle_task(self, body, key=None):
@@ -160,6 +193,7 @@ class Bot:
         if cat in SCRUB:
             env.update(scrub_settings())
             env["SCRUB3D_STOP_FILE"] = STOP_FILE
+            env["SCRUB3D_DIMS"] = DIMS_FILE
             cmd = py + [os.path.join(HERE, "live_body.py"), "--rig", RIG,
                         "--viewer-port", str(RERUN_PORT)]
             if a.dry:
@@ -177,6 +211,8 @@ class Bot:
         for f in (STOP_FILE,):
             if os.path.exists(f):
                 os.remove(f)
+        if cat in SCRUB:
+            self.stop_watch()                          # one camera: the scrub takes it
         cmd, env = self._command(cat)
         self.note("starting: " + " ".join(os.path.basename(c) if c.endswith(".py") else c
                                           for c in cmd[2:]))
@@ -208,10 +244,12 @@ class Bot:
             self.note(park(self.a.endpoint))
         with self.lock:
             self.state, self.task, self.since = "idle", None, time.time()
+        self.start_watch()
         self.note("waiting for the next request")
 
     def shutdown(self):
         self.handle_stop()
+        self.stop_watch()
         with self.lock:
             proc = self.proc
         if proc is not None:
@@ -219,6 +257,108 @@ class Bot:
                 proc.wait(timeout=45.0)
             except subprocess.TimeoutExpired:
                 proc.terminate()
+
+
+# --- what the cartoon is told ----------------------------------------------------------
+
+class Feed:
+    """The websocket the cartoon page (web/main.js) listens on, which
+    py/scrubbot.py used to serve and nothing did once the OpenYAMs took over.
+
+    Ten times a second: what the arms are doing (`phase`), the REAL arms'
+    six joints each, read from the bridge, so the drawn arms move as the real
+    ones do (`joints`, src "measured"), and the sitter's thirteen measured
+    dimensions from the running scrub, so the cartoon is their size (`body`).
+    The cartoon's own pose stays with the browser's camera: the scrub shares
+    its joints twice a second, which would make the mirror jerk. --measured-pose
+    sends them anyway.
+
+    Read only, like py/armbridge.py: it asks the bridge for state and nothing
+    else. An "estop" from the page is a stop."""
+
+    def __init__(self, bot):
+        self.bot, self.joints, self.clients = bot, None, set()
+        threading.Thread(target=self._serve, daemon=True).start()
+        if not bot.a.dry and bot.a.endpoint:
+            threading.Thread(target=self._poll_bridge, daemon=True).start()
+
+    def _poll_bridge(self):
+        os.environ["SCRUB3D_ARM"] = "openyam"
+        for p in (S3D, HERE):
+            if p not in sys.path:
+                sys.path.insert(0, p)
+        link = None
+        while True:
+            try:
+                if link is None:
+                    from arm_dimos import Link
+                    link = Link(self.bot.a.endpoint)
+                rep = link.call({"op": "state"}, timeout=1.0)
+                arms = rep.get("arms") or {}
+                q = {f"a{i}": (arms.get(side) or {}).get("joints")
+                     for i, side in enumerate(("left", "right"))}
+                self.joints = q if rep.get("ok") and any(q.values()) else None
+            except Exception:                                   # noqa: BLE001
+                self.joints, link = None, None
+                time.sleep(2.0)
+            time.sleep(0.1)
+
+    def message(self):
+        m = {"phase": PHASES.get(self.bot.state, "IDLE")}
+        if self.joints:
+            m["joints"] = {"src": "measured", "arms": self.joints}
+        try:
+            if time.time() - os.stat(DIMS_FILE).st_mtime < 5.0:
+                with open(DIMS_FILE, encoding="utf-8") as f:
+                    d = json.load(f)
+                if d.get("body"):
+                    m["body"] = d["body"]
+                if d.get("limbs") and self.bot.a.measured_pose:
+                    m["limbs"] = d["limbs"]
+        except (OSError, ValueError):
+            pass
+        return m
+
+    def _serve(self):
+        try:
+            import asyncio
+            import websockets
+        except ImportError:
+            print("  no 'websockets' package: the cartoon gets no live data", flush=True)
+            return
+
+        async def handler(ws):
+            self.clients.add(ws)
+            try:
+                async for raw in ws:
+                    try:
+                        cmd = json.loads(raw).get("cmd")
+                    except (ValueError, AttributeError):
+                        continue
+                    if cmd == "estop":
+                        self.bot.handle_stop()
+                        await ws.send(json.dumps({"ack": {"cmd": "estop", "ok": True}}))
+            finally:
+                self.clients.discard(ws)
+
+        async def main():
+            try:
+                server = await websockets.serve(handler, "127.0.0.1", WS_PORT)
+            except OSError as exc:
+                print(f"  port {WS_PORT} is taken ({exc}): the cartoon gets no live data",
+                      flush=True)
+                return
+            async with server:
+                while True:
+                    if self.clients:
+                        raw = json.dumps(self.message(), allow_nan=False)
+                        for ws in list(self.clients):
+                            try:
+                                await ws.send(raw)
+                            except Exception:                   # noqa: BLE001
+                                self.clients.discard(ws)
+                    await asyncio.sleep(0.1)
+        asyncio.run(main())
 
 
 def park(endpoint=None):
@@ -322,7 +462,8 @@ def make_handler(bot, key=None):
 
 
 def self_test():
-    a = argparse.Namespace(dry=True, upside_down=False, endpoint=None, recording=RECORDING)
+    a = argparse.Namespace(dry=True, upside_down=False, endpoint=None, recording=RECORDING,
+                           measured_pose=False, no_watch=True)
     bot = Bot(a)
     s = scrub_settings()
     assert s.get("SCRUB3D_ARM") == "openyam" and "SCRUB3D_SPONGE_R_MM" in s, s
@@ -348,6 +489,17 @@ def self_test():
     assert st["state"] == "idle" and any("back where it rested" in x for x in st["said"]), st
     print("  take_meds: accepted once, a second request refused as busy, the bottle went to "
           "the mouth and back (simulated joints), idle again")
+    feed = Feed.__new__(Feed)
+    feed.bot, feed.joints = bot, {"a0": [0.0] * 6, "a1": [0.1] * 6}
+    with open(DIMS_FILE, "w", encoding="utf-8") as f:
+        json.dump({"body": {"src": "depth", "mm": {"shoulders": 350}, "confidence": {}},
+                   "limbs": {"mm": {}}}, f)
+    m = feed.message()
+    assert m["phase"] == "IDLE" and m["joints"]["src"] == "measured" and "body" in m, m
+    assert "limbs" not in m
+    os.remove(DIMS_FILE)
+    print("  the cartoon's feed: phase, the real arms' joints and the measured body; the pose "
+          "stays with the browser")
     print("  carebot: OK")
     return 0
 
@@ -366,6 +518,11 @@ def main():
     ap.add_argument("--rerun-port", type=int, default=RERUN_PORT)
     ap.add_argument("--rerun-web-port", type=int, default=RERUN_WEB_PORT)
     ap.add_argument("--page-port", type=int, default=PAGE_PORT)
+    ap.add_argument("--measured-pose", action="store_true",
+                    help="also send the cartoon the sitter's arm joints as the depth camera "
+                         "places them (2 a second: jerky next to the browser's own camera)")
+    ap.add_argument("--no-watch", action="store_true",
+                    help="no live 3D render between tasks (it uses the camera)")
     ap.add_argument("--no-views", action="store_true", help="do not serve the cartoon or Rerun")
     a = ap.parse_args()
     if a.selftest:
@@ -376,7 +533,10 @@ def main():
     g["RERUN_PORT"], g["RERUN_WEB_PORT"], g["PAGE_PORT"] = a.rerun_port, a.rerun_web_port, a.page_port
     a.endpoint = a.endpoint or scrub_settings().get("SCRUB3D_DIMOS")
     bot = Bot(a)
+    Feed(bot)
     views = [] if a.no_views else start_views(a)
+    time.sleep(2.0)                                  # Rerun first, so the render finds it
+    bot.start_watch()
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), make_handler(bot, os.environ.get("ROBOT_API_KEY")))
     print(f"  carebot on http://127.0.0.1:{a.port} ("
           + ("REAL ARMS at " + str(a.endpoint) if a.real else "dry: nothing real moves") + ")\n"

@@ -9,12 +9,13 @@ export function mountVitals(root, onMicrophoneToggle, dependencies = {}) {
   const EventStream = dependencies.EventSource || globalThis.EventSource;
   const doc = dependencies.document || document;
   const now = dependencies.now || Date.now;
+  const onStop = dependencies.onStop;
   root.innerHTML = `<div class="temperature-panel">
     <div class="temperature-top"><div><span class="temperature-label">Around your chair</span><h3>Room temperature</h3></div><span id="temperature-status" class="sensor-status">Waiting for chair</span></div>
     <div class="temperature-body"><div class="temperature-reading"><div><span id="temperature-value">—</span><span class="temperature-unit">°C</span></div><p><span id="temperature-fahrenheit">—</span> °F <span class="temperature-divider">·</span> <span id="temperature-humidity">—</span>% humidity</p><small id="temperature-updated">No reading yet</small></div>
     <div class="temperature-explanation"><span class="temperature-icon" aria-hidden="true">∿</span><div><h4 id="temperature-meaning">Waiting for a reading</h4><p id="temperature-advice">Connect your chair by USB to see the temperature around you.</p></div></div></div>
-    <div class="temperature-bottom"><p>Measures the air around you, not body temperature. The 20–26°C guide describes comfort, not a medical range.</p><span id="hardware-button-hint">Button A · microphone on / off</span></div>
-    <details class="sensor-details"><summary>Chair connection</summary><p id="sensor-connection">Checking your chair…</p><div id="sensor-modules"></div><div class="physical-buttons"><span id="physical-button-1">A · microphone</span><span id="physical-button-2">B · unassigned</span><span id="physical-button-3">C · unassigned</span></div></details>
+    <div class="temperature-bottom"><p>Measures the air around you, not body temperature. The 20–26°C guide describes comfort, not a medical range.</p><span id="hardware-button-hint">Button A · microphone on / off   ·   Button B · stop the arms</span></div>
+    <details class="sensor-details"><summary>Chair connection</summary><p id="sensor-connection">Checking your chair…</p><div id="sensor-modules"></div><div class="physical-buttons"><span id="physical-button-1">A · microphone</span><span id="physical-button-2">B · stop the arms</span><span id="physical-button-3">C · unassigned</span></div></details>
   </div>`;
   const $ = selector => root.querySelector(selector);
   let stream, disposed = false, lastButtonTime = 0, lastSnapshot = null, lastReceived = 0;
@@ -52,6 +53,7 @@ export function mountVitals(root, onMicrophoneToggle, dependencies = {}) {
     stream.addEventListener('button',event=>{
       if(doc.hidden || disposed)return;
       let value;try{value=JSON.parse(event.data);}catch{return;}
+      if(value.button===2 && Number.isFinite(value.receivedAt) && Math.abs(now()-value.receivedAt)<=2000){onStop?.();return;}  // B: stop the arms. Never debounced away: a stop is a stop.
       if(value.button!==1 || !Number.isFinite(value.receivedAt) || Math.abs(now()-value.receivedAt)>2000 || value.receivedAt-lastButtonTime<250)return;
       lastButtonTime=value.receivedAt; onMicrophoneToggle();
     });
