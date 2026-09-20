@@ -1,0 +1,34 @@
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+# recordings/backup.mp4 IS COMMITTED. It is the recovery card's last-resort
+# artifact -- "total failure -> open it and narrate" -- so it has to survive a
+# laptop reinstall, a fresh clone, and a dead venv. 11MB is cheap for that.
+# test_docs_match_code.py fails if it goes missing.
+recordings/*.mp4
+!recordings/backup.mp4
+homography.pkl
+.homography-is-synthetic
+
+# ECC is vendored into .claude/ for skills/agents/commands. Keep it out of diffs.
+.claude/skills/
+.claude/agents/
+.claude/commands/
+.claude/rules/
+
+# Pose models are fetched by vendor.sh, not committed: 40MB of binary
+# that changes when Google republishes them.
+models/*.task
+web/models/*.task
+
+# scrub3d capture sessions: 600MB of recorded RealSense frames from camera
+# day. The code reads them when they are there and synthesises a body when
+# they are not, so the repo carries the code and not the captures.
+scrub3d/data/live_rec_*/
+
+# A live solve's output. py/scrubbot.py writes this when someone presses 'v';
+# web/assets/body.json is the committed bake and the page's floor. Committing a
+# live solve would make one run's measurement look like the shipped default.
+web/assets/body-live.json
+web/assets/*.partial

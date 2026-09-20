@@ -1,0 +1,42 @@
+{
+  "name": "searched: clear of the person at rest",
+  "frame": "x and y from the seat point, z above the floor",
+  "saved": "2026-09-19T19:28:18",
+  "arms": [
+    {
+      "id": "a0",
+      "x_from_seat_mm": 610.0,
+      "y_from_seat_mm": 35.0,
+      "z_mm": 640.0,
+      "facing_deg": -180.0,
+      "tilt_deg": 0.0
+    },
+    {
+      "id": "a1",
+      "x_from_seat_mm": 410.0,
+      "y_from_seat_mm": 520.0,
+      "z_mm": 750.0,
+      "facing_deg": -101.1
+    },
+    {
+      "id": "a2",
+      "x_from_seat_mm": 470.0,
+      "y_from_seat_mm": -440.0,
+      "z_mm": 750.0,
+      "facing_deg": 104.0
+    }
+  ],
+  "coverage": 0.3353,
+  "per_arm_cm2": [
+    523,
+    375,
+    315
+  ],
+  "phases": [
+    [
+      0,
+      1,
+      2
+    ]
+  ]
+}

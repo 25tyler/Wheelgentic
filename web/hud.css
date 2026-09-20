@@ -1,0 +1,281 @@
+/* web/hud.css — Press Start 2P is very wide and has no distinct lowercase.
+   Keep HUD copy to short UPPERCASE words. */
+@font-face { font-family:'PS2P'; src:url('./vendor/fonts/PressStart2P.woff2') format('woff2');
+             font-display:block; }
+* { margin:0; padding:0; box-sizing:border-box }
+body { background:#0e1220; overflow:hidden; font-family:'PS2P', monospace }
+canvas { display:block }
+#cam { display:none }
+/* pointer-events:none or the HUD swallows clicks meant for the canvas */
+#hud  { position:fixed; inset:0; pointer-events:none; z-index:50;
+        color:#fff; text-shadow:0.45vh 0.45vh 0 #000; padding:3vh }
+/* VIEWPORT-RELATIVE SIZING. Fixed px looked fine on a 720p test window and
+   was unreadable on a 1080p projector: the privacy line — which carries the
+   whole pitch — measured 11px = 1.0% of screen height. A judge ten feet back
+   cannot read that. clamp() keeps a floor for small windows and a ceiling so
+   nothing overruns at 4K. Verified at 1920x1080, 1280x720 and 1024x768. */
+#title   { font-size:clamp(24px, 2.4vh, 46px); color:#ffd84d; letter-spacing:2px }
+/* WHAT IT IS, beside the name. Smaller and dimmer than WHEELGENTIC so the
+   name still reads first, but present, because the codename alone tells
+   a judge nothing about what they are looking at. Same amber family so
+   it reads as part of the title rather than a fourth HUD element. */
+#what    { font-size:clamp(9px, 1.05vh, 16px); color:#b39a3d;
+           letter-spacing:1px; margin-left:1.1em; vertical-align:middle }
+#privacy { font-size:clamp(13px, 1.5vh, 28px); color:#6bcf7f;
+           margin-top:1.2vh; line-height:1.6; letter-spacing:1px }
+/* THE COUNT THAT CLIMBS is dimmer than the line, because it is the ordinary
+   half: cameras see frames, that is their job. The ZERO is the claim, so it
+   keeps the line's own green and is the brightest thing in the sentence.
+   Getting this the other way round would put the emphasis on surveillance
+   happening rather than on nothing being kept. */
+#privacy .seen { color:#9fb6d8; }
+/* THE SUBJECT STATE. Locked is the same green as the stored zero,
+   because both are the system working. Looking is amber, not red:
+   during the 1:02 handoff there genuinely is nobody in frame and that
+   is not a fault -- red would tell a judge something broke at the one
+   moment two people are swapping places in front of the camera. */
+#privacy .lock { color:#6bcf7f; }
+#privacy .hunt { color:#ffd84d; }
+#privacy .kept { color:#6bcf7f; font-weight:bold; }
+/* THE CYCLE LINE. Same clamp() family as #privacy so it scales with the
+   projector (that sizing was tuned for legibility at 1080p -- see the note
+   above). Dim when idle, bright when a real Python cycle is live. It is
+   driven ONLY from cycleLive's assignment sites in main.js, never a timer. */
+#cycle      { font-size:clamp(13px, 1.5vh, 28px); color:#55607a;
+              margin-top:0.9vh; letter-spacing:1px }
+#cycle.live { color:#4ec9f5 }
+/* ONE FLEX STACK, not three independent `bottom` offsets. Positioning them
+   separately let the clamped pct font (97px at 1080p) grow past the label's
+   15vh gap and OVERLAP it — visible only in a screenshot, invisible to the
+   bounding-box measurements, which reported "offscreen: none" throughout. */
+#hudbottom { position:fixed; left:3vh; right:3vh; bottom:3vh; z-index:51;
+             display:flex; flex-direction:column; gap:0.8vh;
+             pointer-events:none }
+#label { font-size:clamp(18px, 2vh, 38px) }
+#pct   { font-size:clamp(56px, 9vh, 150px); color:#4ec9f5; line-height:1 }
+#bar   { width:100%; height:clamp(28px, 3.4vh, 64px);
+         border:clamp(4px,.6vh,10px) solid #000; background:#22304d }
+#fill  { height:100%; width:0%; background:#4ec9f5 }
+#link  { position:fixed; right:3vh; top:3vh; font-size:clamp(12px,1.4vh,24px) }
+#link.ok   { color:#6bcf7f }
+#link.warn { color:#ffd84d }
+/* Shown only by the classic watchdog in index.html when NO module evaluated --
+   a missing bare-specifier target (three) kills the whole module graph, so this
+   cannot be styled or revealed by any module. z-index above #gate: the watchdog
+   removes #gate, but ordering must not depend on that. */
+/* [hidden] MUST WIN. An ID selector outranks the UA stylesheet's
+   [hidden]{display:none}, so `#bootfail{display:flex}` alone left this overlay
+   PAINTED AT ALL TIMES -- full-viewport, z-index 300, solid background. The DOM
+   read `el.hidden === true` the whole time (that reports the ATTRIBUTE, not the
+   computed style), so every probe called it hidden while it covered the screen.
+   Caught by recording the page: backup.mp4 was 49s of the failure notice at
+   57kbps, and Playwright's capture was showing exactly what the compositor had. */
+#bootfail[hidden] { display:none !important; }
+#bootfail { position:fixed; inset:0; z-index:300; display:flex;
+            flex-direction:column; align-items:center; justify-content:center;
+            gap:14px; background:#1a0d0d; color:#ffd7d7;
+            font:600 30px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+            text-align:center; padding:6vh 8vw; }
+#bootfail b    { font-size:46px; letter-spacing:.04em; color:#ff8b8b; }
+#bootfail span { font-size:24px; font-weight:400; opacity:.92; }
+#bootfail code { background:#2e1616; padding:.12em .4em; border-radius:4px;
+                 color:#fff; }
+
+/* #0009, NOT #000c. At 80% black the first thing a judge ever sees was a
+   near-black screen with yellow text on it: the chair, the four arms, the
+   tiled wall and the light shaft were all behind the gate and all invisible.
+   The scene is the pitch, and it was being hidden until someone pressed a
+   key. At 56% everything reads and the instruction is still by far the
+   brightest thing on screen -- checked side by side at 1920x1080. */
+#gate  { position:fixed; inset:0; z-index:200; display:flex;
+         align-items:center; justify-content:center; background:#0009;
+         color:#ffd84d; font-family:'PS2P',monospace;
+         font-size:clamp(20px, 3vh, 54px); text-align:center; padding:4vh }
+body.complete #pct { color:#6bcf7f }
+
+/* ---- THE FOUR CAPABILITIES ------------------------------------------
+   Right edge, vertical, because the bottom band already carries the
+   cleanliness readout and the top carries the title and link state. The
+   right side was the only empty HUD edge, and it is also the side the
+   audience's eye lands on last, which is right for a legend rather than
+   a headline.
+
+   The ACTIVE one is bright and scaled up; the rest dim back. That single
+   contrast is what tells a judge these are four modes of one machine and
+   not four labels. */
+#modes { position:fixed; right:3vh; top:50%; transform:translateY(-50%);
+         display:flex; flex-direction:column; gap:1.6vh; z-index:50;
+         font-family:'PS2P',monospace; text-align:right; }
+#modes .mode { opacity:.28; transition:opacity .45s ease, transform .45s ease;
+               transform:scale(.92); transform-origin:right center; }
+#modes .mode b    { display:block; font-size:clamp(11px,1.5vh,22px);
+                    color:#8fa2c4; letter-spacing:.06em; }
+#modes .mode span { display:block; font-size:clamp(7px,.95vh,13px);
+                    color:#6c7c98; margin-top:.5vh; letter-spacing:.02em; }
+#modes .mode.active            { opacity:1; transform:scale(1); }
+#modes .mode.active b          { color:#4ec9f5; }
+#modes .mode.active span       { color:#9fb6d8; }
+/* Done modes stay legible but recede, so the strip reads as progress
+   through the product rather than a menu. */
+#modes .mode.done      { opacity:.55; }
+#modes .mode.done b    { color:#6bcf7f; }
+
+/* ---- WHAT THE CHAIR HEARD ------------------------------------------
+   Centred under the person, above the bottom readout. Interim words are
+   dim and italic; the final phrase snaps bright, so an audience can see
+   the recogniser settle in real time. */
+#heard { position:fixed; left:50%; bottom:22vh; transform:translateX(-50%);
+         font-family:'PS2P',monospace; font-size:clamp(10px,1.5vh,22px);
+         /* #8fa2c4 measures 3.53:1 over the FLOOR colour this sits on (not
+            the sky the rest of the HUD sits on), and 0.75 opacity drops it
+            further. Interim words are meant to look provisional, not
+            illegible -- a judge should be able to read the machine mishearing
+            them. #b8c6e0 at 0.85 clears the bar and still reads as unfinished
+            next to the bright cyan the final phrase snaps to. */
+         color:#b8c6e0; opacity:.85; letter-spacing:.04em;
+         text-align:center; max-width:70vw; z-index:60;
+         transition:color .18s ease, opacity .18s ease; }
+#heard.final { color:#4ec9f5; opacity:1; }
+
+
+/* ---- THE HEARTBEAT TRACE -------------------------------------------
+   Sits just above the bottom readout, centred, so the number and the
+   waveform read as one instrument. Hidden until vitals mode adds the
+   .on class, because an empty box bottom-centre is worse than nothing. */
+#ecg { position:fixed; left:50%; bottom:15vh; transform:translateX(-50%);
+       opacity:0; transition:opacity .4s ease; z-index:55;
+       pointer-events:none; }
+#ecg.on { opacity:1; }
+
+
+/* ---- THE SAFETY GOVERNOR -------------------------------------------
+   Top-left under the cycle line, because it belongs with the other
+   state the machine reports about itself rather than with the
+   person's numbers at the bottom. */
+#governor { position:fixed; left:3vh; top:calc(3vh + 7.5em); z-index:60;
+            font-family:'PS2P',monospace; font-size:clamp(8px,1.05vh,15px);
+            line-height:1.9; letter-spacing:.03em; }
+#governor .v { opacity:0; transform:translateX(-6px);
+               transition:opacity .25s ease, transform .25s ease; }
+#governor .v.on { opacity:1; transform:none; }
+#governor .clear   { color:#6bcf7f; }
+#governor .hold    { color:#ffd84d; }
+#governor .refuse  { color:#ff8b6b; }
+
+
+/* ---- PER-ARM TERRITORY COUNTS ---------------------------------------
+   Under the scan on the left, in the same four colours the cells use,
+   so a row and a region are obviously the same thing. */
+#counts { position:fixed; left:3vh; bottom:24vh; z-index:55;
+          font-family:'PS2P',monospace; font-size:clamp(8px,1.05vh,15px);
+          line-height:2; opacity:0; transition:opacity .4s ease; }
+#counts.on { opacity:1; }
+#counts .row { letter-spacing:.04em; }
+#counts .a0 { color:#4ec9f5; }
+#counts .a1 { color:#ffd94a; }
+#counts .a2 { color:#6bcf7f; }
+#counts .a3 { color:#ff8b6b; }
+/* #66748f measured 2.47:1 against the backdrop, well under the 4.5:1 that
+   is readable, and this line sits on a projector ten feet from a judge.
+   #8fa2c4 is 4.51:1 and is already the mode strip's dim colour, so the two
+   dim states match rather than being two different greys. */
+#counts .un { color:#8fa2c4; }
+
+/* The body part an arm owns, beside its count. Dimmer than the number so
+   the colour-coded count still leads and the words support it. */
+#counts .part { opacity:.62; letter-spacing:.02em; }
+
+/* Contested cells: reachable by more than one arm, so the solver had to
+   resolve a claim. Its own colour because the row belongs to no single arm.
+   MEASURED against the five colours already in this panel: a softer violet
+   sat 0.25 from the unreachable slate directly beneath it, which is too
+   close for two adjacent rows. This is 0.36 from its nearest neighbour and
+   7.1:1 against the HUD background. */
+#counts .cont { color:#e07ad4; }
+/* The schedule. Cyan, because it is a different KIND of fact from the
+   per-arm cell counts above it: those say who owns what, this says who
+   can move at the same time. Same family as the mode strip's active
+   colour so it reads as a conclusion rather than another tally. */
+#counts .sched { color:#4ec9f5; }
+
+
+/* ---- CARE DELIVERED -------------------------------------------------
+   Top right, under the link state and above the mode strip -- the only
+   empty edge left on a screen with six text panels. Small and quiet: it
+   is a fact that accumulates, not a headline, and it must never compete
+   with the cleanliness counter at the bottom left. */
+/* 4.2em below the top, not 2.6: #link sits at 3vh with its own clamp, and
+   at 1080p the tighter offset left five pixels of gap. The two clamps scale
+   differently, so a gap that survives one resolution is not a gap that
+   survives three. */
+#care { position:fixed; right:3vh; top:calc(3vh + 4.2em); z-index:55;
+        font-family:'PS2P',monospace; font-size:clamp(7px,.95vh,13px);
+        line-height:2; text-align:right; opacity:0;
+        transition:opacity .5s ease; }
+/* THE NUMBERS GET THE HEADLINE SIZE, THE WORDS GET THE SUBTITLE SIZE.
+   This started out uniformly at subtitle size and the one readout on
+   screen that measures a person rather than the machine was the faintest
+   thing on the projector. The mode strip beneath it already sets the
+   scale a judge reads at distance -- 1.5vh for the thing that matters,
+   .95vh for the gloss -- so the count matches its headline and the
+   labels match its gloss. */
+#care .n, #care .z { font-size:clamp(11px,1.5vh,22px); }
+#care.on { opacity:1; }
+/* The seconds climb, so they lead. */
+#care .n { color:#9fdcff; }
+/* The zeros are the point: nobody lifted, nobody hurt. Green because
+   they are the good outcome, and green is already the finale's colour
+   for "this went right". */
+#care .z { color:#6bcf7f; }
+#care .k { color:#6c7c98; }
+
+
+/* ---- THE VIEW HER BUTTONS OPEN -------------------------------------
+   Plan §5 phase 4. Shown ONLY when main.js has read a ?view= parameter
+   and added .on -- the projector page never carries one, so the default
+   here is display:none and the main view is untouched by all of this.
+
+   TOP-LEFT, NOT TOP-RIGHT. #link (ARM LINKED / MANUAL) owns the top
+   right and #care sits under it; the title block owns the top left but
+   ends around 7em down, which is where #governor starts. In an embedded
+   view the governor is not running, so this takes that slot. Checked
+   against both: at 1920x1080 the title bottom is ~110px and this begins
+   at 3vh + 5.2em.
+
+   IT IS THE FIRST THING READ, so it is the brightest thing in the
+   corner. Everything else in this HUD reports a number; this reports
+   what the picture IS, and a caretaker who cannot tell a live arm from
+   a drawn one has been misled by the view rather than informed by it. */
+#taskview { display:none; }
+#taskview.on { position:fixed; left:3vh; top:calc(3vh + 5.2em); z-index:70;
+               display:block; font-family:'PS2P',monospace;
+               text-shadow:0.45vh 0.45vh 0 #000; pointer-events:none; }
+/* clamp() with a HIGHER FLOOR than the rest of the HUD. Every other panel
+   was tuned for a 1920x1080 projector ten feet away; this one also has to
+   read inside an iframe a few hundred pixels wide in a modal on a laptop,
+   where 1.5vh of a short viewport is single-digit pixels. The floor is what
+   makes it survive the small case and the ceiling keeps it from shouting on
+   the projector. */
+#taskview .n { font-size:clamp(14px, 1.7vh, 26px); color:#4ec9f5;
+               letter-spacing:.06em; }
+/* THE THREE HONEST STATES, plan §5 4.2. Colour carries the same meaning
+   as everywhere else on this page: green is the machine working, amber
+   is a caveat the viewer must hold, slate is nothing there at all.
+
+   AMBER FOR COMMANDED, NOT GREEN. These are the angles we SENT, drawn
+   perfectly; they are indistinguishable on screen from angles an encoder
+   returned. Today every arm on this page is in that state -- the stack
+   that owns the encoders is live on the bus and attaching is forbidden --
+   so amber is the normal case, not an error case. Green is reserved and
+   currently unreachable, and that is the correct way round: a colour
+   that cannot yet be earned must not be spent. */
+#taskview .s        { font-size:clamp(10px, 1.15vh, 17px); margin-top:.55vh;
+                      line-height:1.75; letter-spacing:.03em; }
+#taskview .s b      { font-weight:normal; }
+#taskview .s .live  { color:#6bcf7f; }   /* measured by hardware */
+#taskview .s .cmd   { color:#ffd84d; }   /* commanded, not measured */
+#taskview .s .none  { color:#8fa2c4; }   /* not connected */
+/* The component's name, dimmer than its state, because the state is the
+   claim and the name is only what the claim is about. Same grey the mode
+   strip uses for its dim rows so the two read as one family. */
+#taskview .s .k     { color:#6c7c98; }

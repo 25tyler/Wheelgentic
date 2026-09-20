@@ -1,0 +1,23 @@
+{
+  "forearm_z_mm": 45.0,
+  "scrub_seconds": 8.0,
+  "scrub_hz": 1.2,
+  "scrub_amp_mm": 35.0,
+  "mirror": true,
+  "_arm_note": "mirror decides WHICH ARM gets scrubbed, not --right-arm. With mirror:true (this file) the default L_* landmarks land on the subject's RIGHT arm; --right-arm selects R_* = their LEFT. Measured in all four wave x mirror cells. Wave one arm and check the dots land on it -- if they land on the other arm, flip mirror.",
+  "serial_port": null,
+  "dirt_mode": "scripted",
+  "_comment": "HOT-RELOADS on save — no restart. Edit mid-demo if needed.",
+  "dirt_v_min": 190,
+  "dirt_s_min": 60,
+  "dirt_min_area": 80,
+  "dirt_skin_hue_max": 26,
+  "dirt_skin_hue_min": 160,
+  "_dirt_note": "set dirt_mode to 'uv' to use real fluorescence detection; tune with tools/tune_dirt.py, which prints all five dirt_* keys to paste here. All of them hot-reload.",
+  "contact_depth_mm": -5.0,
+  "_contact_note": "-5 = press into the skin (torque feedback works); +20 = hover, per the team brainstorm — then also pass --no-contact-gate or splotches never pop",
+  "care_api_port": 8770,
+  "_care_api_note": "seam B: the port py/careapi.py serves /api/task, /api/stop and /api/vitals on. Crystal's carechair .env points at it with ROBOT_MODE=live and ROBOT_BACKEND_URL=http://127.0.0.1:8770. Read once at startup, so this key does NOT hot-reload -- moving it needs a restart.",
+  "use_water_bucket": false,
+  "_water_note": "team brainstorm says NO WATER (damages the motors). false = scripted mode skips the bucket dip."
+}

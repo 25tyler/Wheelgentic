@@ -1,0 +1,41 @@
+{
+  "name": "placed by hand: red low in front, at the crotch",
+  "frame": "x and y from the seat point, z above the floor",
+  "saved": "2026-09-19T15:12:08",
+  "arms": [
+    {
+      "id": "a0",
+      "x_from_seat_mm": 430.0,
+      "y_from_seat_mm": 35.0,
+      "z_mm": 405.0,
+      "facing_deg": -180.0
+    },
+    {
+      "id": "a1",
+      "x_from_seat_mm": 190.0,
+      "y_from_seat_mm": 445.0,
+      "z_mm": 555.0,
+      "facing_deg": -101.1
+    },
+    {
+      "id": "a2",
+      "x_from_seat_mm": 250.0,
+      "y_from_seat_mm": -440.0,
+      "z_mm": 555.0,
+      "facing_deg": 104.0
+    }
+  ],
+  "coverage": 0.3353,
+  "per_arm_cm2": [
+    523,
+    375,
+    315
+  ],
+  "phases": [
+    [
+      0,
+      1,
+      2
+    ]
+  ]
+}

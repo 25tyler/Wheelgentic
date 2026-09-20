@@ -1,0 +1,176 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Wheelgentic</title>
+<link rel="stylesheet" href="./hud.css">
+<script type="importmap">
+{ "imports": {
+    "three": "./vendor/three.module.min.js",
+    "three/addons/": "./vendor/addons/"
+} }
+</script>
+<!-- classic scripts; must load BEFORE the module that uses them -->
+<script src="./vendor/confetti.browser.js"></script>
+<script src="./vendor/gsap.min.js"></script>
+<script src="./vendor/zzfx.js"></script>
+
+<!-- `hidden` IS THE PRIVACY GUARANTEE, NOT hud.css:8. This element carries the
+     live webcam feed. Its only concealment used to be `#cam { display:none }`
+     in hud.css, so a 404 on that stylesheet -- a partial vendor.sh, a bad
+     deploy, one typo'd filename -- painted the raw camera on the projector
+     while the page kept working: canvas rendered, keys responsive, counter
+     counting, NO page error. MEASURED by blocking **/hud.css in Playwright:
+     display=inline, 300x150, one client rect. The HUD one line below says
+     "ON-DEVICE ONLY - 0 FRAMES STORED", so that failure mode contradicts the
+     pitch in the most visible way available, and it fails OPEN and SILENT.
+     The attribute is hidden by the UA stylesheet with NO author CSS at all. -->
+<video id="cam" autoplay playsinline muted hidden></video>
+
+<div id="hud">
+  <!-- THE NAME AND WHAT IT IS. "WHEELGENTIC" is the project codename and it
+       tells a judge nothing: the product is an AI wheelchair with robotic
+       arms, and the title was the only line on screen that could say so.
+       The privacy line below already has a job.
+
+       "TWO ARMS", NOT "FOUR". This said FOUR while the page drew three and
+       the hardware is two. Three different answers to "how many arms", one
+       of them in 28-point type at the top of the projector.
+
+       TWO IS THE MEASURED ONE. scrub3d/live/live_rig_openyam.json is a tape
+       measure -- 850mm apart, 550mm up, 200mm ahead of the seat, on a plank
+       across the armrests. Four was the brainstorm's ask and three was a
+       search result; neither is bolted to anything. A judge who counts the
+       arms on screen must get the number the caption gives. -->
+  <div id="title">WHEELGENTIC<span id="what">AI WHEELCHAIR &middot; TWO ARMS</span></div>
+  <!-- THE SAME SHAPE stepPrivacy writes, so the line does not change
+       WORDING once frames start arriving -- only the number moves. It
+       used to read "0 FRAMES STORED" here and "N SEEN - 0 STORED" a
+       moment later, which reads as the HUD glitching rather than as a
+       count starting. Zero seen is also true before the first frame. -->
+  <div id="privacy">ON-DEVICE ONLY &middot; <span class="seen">0</span> SEEN &middot; <span class="kept">0</span> STORED</div>
+  <div id="cycle">IDLE</div>
+  <div id="link" class="warn">CONNECTING</div>
+</div>
+<!-- THE FOUR CAPABILITIES, from the brainstorm: shower, eating and pill
+     feeding, vitals, voice. The demo did one of them, so a judge watching had
+     no way to know the other three were the point. This strip is the cheapest
+     possible way to show the product is a wheelchair that does four jobs
+     rather than a machine that scrubs an arm.
+
+     Static markup, revealed and driven by main.js. Kept out of the canvas so
+     it costs no draw calls and stays crisp at projector resolution. -->
+<div id="modes">
+  <!-- "scanned body", NOT "measured body", and the change is a correctness fix
+       rather than a wording preference.
+
+       This strip is static markup shown from page load. It read "4 arms,
+       measured body" while the body on screen came from tools/export_body.py,
+       which called anatomy.anatomical_body() with no arguments -- so every
+       body the page had ever drawn was anatomy.ADULT, a table of population-
+       typical adult numbers. Nobody had been measured. The word described a
+       constant, on the one line a judge reads as the product's claim.
+
+       A real measurement now exists (py/measure.py, wired into the live solve)
+       and when one succeeds the page says so ITSELF, in the flash at
+       main.js's m.solve handler: "MEASURED THIS PERSON". That message is
+       gated on the backend's `measured` flag, so it cannot appear unless a
+       person really was measured. This line must therefore describe what is
+       true BEFORE that happens, or it goes back to claiming the measurement
+       for the population table. -->
+  <!-- "2 arms", for the reason the title above says TWO. Same count, same
+       measured file, and the two lines are four inches apart on a projector
+       so they cannot be allowed to disagree. -->
+  <div class="mode active" data-mode="shower"><b>SHOWER</b><span>2 arms, scanned body</span></div>
+  <div class="mode" data-mode="feed"><b>FEED</b><span>eating, drinking, pills</span></div>
+  <div class="mode" data-mode="vitals"><b>VITALS</b><span>heart rate, SpO2</span></div>
+  <div class="mode" data-mode="voice"><b>VOICE</b><span>ask for anything</span></div>
+</div>
+<!-- WHAT THE CHAIR HEARD. Blank until the microphone is on. Showing the
+     words back is not decoration: a voice interface that gives no evidence it
+     understood is the most frustrating object in the room, and on a projector
+     it is the only way an audience knows the machine is responding to speech
+     rather than to a key someone pressed offstage. -->
+<!-- THE HEARTBEAT TRACE. Empty until vitals mode; vitals.js appends a
+     canvas. A number alone does not read as monitoring from ten feet away,
+     and everyone recognises a hospital waveform without being told. -->
+<!-- THE SAFETY GOVERNOR'S VERDICTS. Every move the backend makes passes a
+     governor that can clear, hold, retreat, refuse or estop it, and that was
+     entirely invisible on the projector. "What is the safety story?" is the
+     question a judge always asks about a machine that touches people, and the
+     answer was words. Now it is a thing they can watch happen. -->
+<div id="governor"></div>
+<!-- PER-ARM TERRITORY COUNTS. Pressing `n` re-solves the partition for a
+     different body and every arm's share changes, which is the proof of the
+     pitch's central claim. Without the numbers on screen an audience has to
+     take that on faith. -->
+<!-- THE ONE READOUT ABOUT A PERSON. Every other number on this
+     screen measures the machine; this one measures what it saved
+     someone. See the block in main.js for why it counts what it
+     counts. -->
+<div id="care"></div>
+<div id="counts"></div>
+<div id="ecg"></div>
+<div id="heard"></div>
+<div id="hudbottom">
+  <div id="label">CLEANLINESS</div>
+  <div id="pct">0%</div>
+  <div id="bar"><div id="fill"></div></div>
+</div>
+<!-- THE VIEW HER BUTTONS OPEN, plan §5 phase 4.
+     Empty and unstyled until main.js reads a ?view= parameter, so the
+     projector page -- which never carries one -- is byte-identical to what it
+     was: no class on #taskview means hud.css gives it display:none, and the
+     element has no children to lay out.
+
+     WHY A URL AND NOT A MESSAGE. We are forbidden from editing Crystal's
+     files (index.html, app.js, server.js, robot-adapter.js). Her Showering /
+     Take Meds / Eating buttons already open a modal; dropping an <iframe src>
+     into that modal is one line of HER code, written by her, whenever she
+     wants it. A postMessage handshake would need her to write a sender as
+     well as a receiver, and a WebSocket from her page would put a second
+     client on our 15Hz pump. A URL is the smallest interface that leaves the
+     seam pointing the right way: we publish an address, she chooses to open
+     it.
+
+     WHY THE BANNER IS STATIC MARKUP rather than built in JS, for the same
+     reason #bootfail is: a judge or a caretaker looking at an embedded view
+     must never be shown an unlabelled 3D scene. If main.js dies after the
+     document parses, the empty element stays invisible; if it lives, it fills
+     this in before the first frame. The failure direction is "no view" rather
+     than "an unlabelled view", which is the safe one for a panel whose entire
+     job is to say what it is showing. -->
+<div id="taskview">
+  <div id="taskname"></div>
+  <div id="tasksrc"></div>
+</div>
+<div id="gate">PRESS ANY KEY TO START</div>
+
+<!-- THE MODULE CANNOT REPORT ITS OWN NON-EXISTENCE. Every module in the graph
+     imports `three` as a bare specifier (main.js:2, avatar.js, juice.js,
+     robotarm.js), resolved by the importmap above. A 404 on
+     vendor/three.module.min.js fails that import, so NO module evaluates --
+     and the code that writes "run ./vendor.sh" into #gate lives inside the
+     module that died. MEASURED by blocking it in Playwright: no canvas, no
+     window.__wheelgentic, gate stuck on "PRESS ANY KEY TO START", Enter and 1/2/3
+     dead, counter at 0% -- and NO pageerror at all. A silent dead page.
+
+     So the notice must be static markup that is already painted, revealed by a
+     CLASSIC script. A type="module" watchdog would share the importmap and die
+     with everything else; a classic script has no imports and always runs. -->
+<div id="bootfail" hidden>
+  <b>WHEELGENTIC FAILED TO START</b>
+  <span>A vendor file is missing or corrupt.</span>
+  <span>Run <code>./vendor.sh</code>, then reload.</span>
+</div>
+<script>
+  // Armed here, cancelled by main.js once the module actually evaluates.
+  // 6000ms: the slowest observed cold boot loads a GLB and a pose model; the
+  // degraded-boot test waits 3200ms, so this must not fire on a healthy page.
+  window.__bootTimer = setTimeout(function () {
+    var el = document.getElementById('bootfail');
+    if (el) el.hidden = false;
+    var g = document.getElementById('gate');
+    if (g) g.remove();          // it says "PRESS ANY KEY" and no key works
+  }, 6000);
+</script>
+
+<script type="module" src="./main.js"></script>

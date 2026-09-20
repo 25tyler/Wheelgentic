@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "name": "searched against scan01, best of two runs",
+  "provenance": "Two independent searches, both scored at k=4 by place_arms.score against the current code and the scan's own obstacle cloud. THIS ONE: score +0.496, coverage 66.6%, imbalance 0.07, per-arm [189, 204, 192, 178] cm2. The other run's winner: score +0.403, coverage 68.1%, imbalance 0.39, per-arm [133, 256, 272, 127]. The hand-placed layout both replace: 26.3% coverage, imbalance 0.98, per-arm [147, 0, 5, 149] -- one arm with no territory at all. The second run scored LOWER on the same objective despite covering 1.5 points more, because its busiest arm carries 272cm2 against 204 and the busiest arm is what sets how long somebody sits in the chair. So the objective was right and the SEARCH missed: 900 samples with two refined candidates does not reliably find the optimum of a 3D-position-plus-yaw space, and a run's best is not the best known. tools/plan_rig.py now refuses to overwrite a rig that scores better than what it found. Stable to +/-2mm on every base (66.0-67.0% coverage), so it is buildable with a tape measure. Bases sample position in 3D but orientation in YAW ONLY: a tilted or inverted mount is representable downstream and is not something this search proposes.",
+  "arms": [
+    {
+      "id": "a0",
+      "x_mm": 237.0,
+      "y_mm": -269.0,
+      "z_mm": 761.0,
+      "facing_deg": 156.3,
+      "serial_number": null
+    },
+    {
+      "id": "a1",
+      "x_mm": 379.0,
+      "y_mm": 464.0,
+      "z_mm": 793.0,
+      "facing_deg": -133.1,
+      "serial_number": null
+    },
+    {
+      "id": "a2",
+      "x_mm": 259.0,
+      "y_mm": -630.0,
+      "z_mm": 869.0,
+      "facing_deg": 129.3,
+      "serial_number": null
+    },
+    {
+      "id": "a3",
+      "x_mm": 30.0,
+      "y_mm": 677.0,
+      "z_mm": 931.0,
+      "facing_deg": -85.5,
+      "serial_number": null
+    }
+  ],
+  "thresholds": {
+    "d_hold_mm": 90.0,
+    "d_estop_mm": 40.0,
+    "d_body_mm": 60.0,
+    "note": "These mirror collide.py. Changing them here does not change the code; they are recorded so a rig file documents the safety margins it was planned under."
+  }
+}

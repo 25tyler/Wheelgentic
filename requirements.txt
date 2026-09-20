@@ -1,0 +1,23 @@
+# PINS ARE LOAD-BEARING. Each one floats into a documented breakage.
+#
+# mediapipe 1.0.1 SIGABRTs on macOS arm64 in DrishtiMetalHelper before the
+#   first frame (exit 134 — try/except provably does NOT catch it).
+# opencv-contrib-python: `pip install mediapipe` otherwise drags in OpenCV 5.0,
+#   which DELETED calibrateHandEye while keeping the CALIB_HAND_EYE_* enums —
+#   so that code fails at CALL time, not import time. Never also install
+#   opencv-python; two cv2 builds conflict.
+# matplotlib: you never plot. mediapipe.tasks.python.vision HARD-IMPORTS
+#   matplotlib.pyplot — without it `import mediapipe` fails outright.
+mediapipe==1.0.0
+opencv-contrib-python==4.12.0.88
+numpy==2.1.3
+pyserial==3.5
+# python-can drives the OpenYAM over SocketCAN. It was a REQUIRED runtime
+# import (openyam.py) that this file never declared, so a clean
+# `pip install -r requirements.txt` on the Pi produced an arm that raised
+# SystemExit the moment it was constructed. It installs and imports fine on
+# macOS; only the socketcan interface it opens is Linux-only, so listing it
+# here costs the Mac nothing.
+python-can==4.3.1
+websockets==17.1
+matplotlib==3.9.2

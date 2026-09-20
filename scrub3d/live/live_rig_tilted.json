@@ -1,0 +1,36 @@
+{
+  "name": "the hand-placed rig of live_rig.json with its bases tipped (tilt and roll searched, nothing moved or turned)",
+  "frame": "x and y from the seat point, z above the floor",
+  "saved": "2026-09-19T14:41:40",
+  "arms": [
+    {
+      "id": "a0",
+      "x_from_seat_mm": 540.0,
+      "y_from_seat_mm": -20.0,
+      "z_mm": 650.0,
+      "facing_deg": -180.0,
+      "tilt_deg": 20.0,
+      "roll_deg": 10.0
+    },
+    {
+      "id": "a1",
+      "x_from_seat_mm": 215.0,
+      "y_from_seat_mm": 535.0,
+      "z_mm": 570.0,
+      "facing_deg": -101.1,
+      "tilt_deg": -10.0,
+      "roll_deg": -20.0
+    },
+    {
+      "id": "a2",
+      "x_from_seat_mm": 250.0,
+      "y_from_seat_mm": -560.0,
+      "z_mm": 555.0,
+      "facing_deg": 104.0,
+      "tilt_deg": 0.0,
+      "roll_deg": 20.0
+    }
+  ],
+  "coverage": 0.4687,
+  "coverage_level": 0.4294
+}

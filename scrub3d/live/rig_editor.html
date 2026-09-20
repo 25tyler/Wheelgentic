@@ -1,0 +1,1356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arm placement</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #161a21; --panel2: #1c212a; --line: #2a303b;
+    --text: #d7dce3; --dim: #8a93a1; --faint: #5c6573;
+    --accent: #6ea8fe; --ok: #4cc38a; --warn: #f2b24c; --bad: #f06a6a;
+    --skin: #d4b29c; --chair: #484c58;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.45 "Segoe UI", system-ui, sans-serif; }
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+    border-bottom: 1px solid var(--line); position: sticky; top: 0;
+    background: rgba(15, 17, 21, .96); z-index: 5; }
+  h1 { font-size: 15px; margin: 0; font-weight: 650; }
+  .grow { flex: 1; }
+  .chip { padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line);
+    color: var(--dim); background: var(--panel); white-space: nowrap; }
+  .chip.dirty { color: var(--warn); border-color: var(--warn); }
+  .chip.bad { color: var(--bad); border-color: var(--bad); }
+  .chip.good { color: var(--ok); border-color: var(--ok); }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 7px; padding: 6px 13px; font: inherit; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button.primary { background: #1e3a66; border-color: #2c5596; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 12px;
+    padding: 12px 16px 24px; }
+  .views { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 12px;
+    align-items: start; }
+  .view, .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+  .view { padding: 8px 10px 10px; }
+  .vtitle { font-weight: 600; color: var(--dim); margin: 0 0 6px; font-size: 12px;
+    text-transform: uppercase; letter-spacing: .5px; }
+  .vtitle small { text-transform: none; letter-spacing: 0; color: var(--faint);
+    font-weight: 400; margin-left: 6px; }
+  svg { width: 100%; height: auto; display: block; touch-action: none; user-select: none;
+    background: #11151b; border-radius: 6px; }
+  aside { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .card { padding: 10px 12px; }
+  .card h2 { font-size: 12px; margin: 0 0 8px; color: var(--dim); text-transform: uppercase;
+    letter-spacing: .6px; font-weight: 650; }
+  .big { font-size: 22px; font-weight: 650; }
+  .muted { color: var(--dim); }
+  .faint { color: var(--faint); }
+  .arm { border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; margin-bottom: 7px;
+    background: var(--panel2); cursor: pointer; }
+  .arm.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .arm .hd { display: flex; align-items: center; gap: 7px; font-weight: 600; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; display: inline-block; }
+  .arm .hd .grow { flex: 1; }
+  .fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-top: 6px; }
+  .fields label { font-size: 10.5px; color: var(--faint); display: block; }
+  .fields input { width: 100%; background: var(--bg); color: var(--text);
+    border: 1px solid var(--line); border-radius: 5px; padding: 3px 5px; font: inherit; }
+  .still { color: var(--warn); font-size: 12px; margin-top: 4px; }
+  .arm .hd button.rm { padding: 0 7px; line-height: 18px; font-size: 12px; color: var(--dim); }
+  .arm .hd button.rm:hover:not(:disabled) { color: var(--bad); border-color: var(--bad); }
+  #add { width: 100%; margin-top: 2px; }
+  ul.msgs { margin: 0; padding-left: 17px; }
+  ul.msgs li { margin: 2px 0; }
+  li.warn { color: var(--warn); }
+  li.bad { color: var(--bad); }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin: 6px 0; }
+  .bar > div { height: 100%; background: var(--accent); width: 0%; transition: width .3s; }
+  pre { white-space: pre-wrap; word-break: break-word; font: 11.5px/1.4 ui-monospace, Consolas, monospace;
+    margin: 6px 0 0; color: var(--dim); }
+  kbd { background: var(--panel2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px;
+    font: 11px ui-monospace, Consolas, monospace; }
+  .help { color: var(--dim); font-size: 12px; }
+  .help div { margin: 2px 0; }
+  .left { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .viewer { position: relative; height: calc(100vh - 90px); min-height: 460px;
+    background: #11151b; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  #view3d { position: absolute; inset: 0; }
+  #view3d canvas { display: block; outline: none; }
+  .tools { position: absolute; top: 10px; left: 10px; display: flex; gap: 6px; flex-wrap: wrap;
+    align-items: center; z-index: 2; }
+  .tools button { padding: 4px 10px; background: rgba(28, 33, 42, .92); }
+  .tools button.on { border-color: var(--accent); color: #fff; background: #1e3a66; }
+  .tools .sep { width: 8px; }
+  .hint { position: absolute; left: 10px; bottom: 8px; color: var(--dim); font-size: 12px;
+    background: rgba(15, 17, 21, .75); padding: 3px 8px; border-radius: 6px; z-index: 2;
+    pointer-events: none; }
+  .vmsg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: var(--dim); z-index: 1; }
+  [hidden] { display: none !important; }
+  .lbl3 { font: 600 12px "Segoe UI", system-ui, sans-serif; padding: 1px 7px; border-radius: 5px;
+    background: rgba(15, 17, 21, .78); white-space: nowrap; pointer-events: none; }
+  .lbl3.dim { color: var(--dim); font-weight: 400; }
+  .handle { cursor: grab; }
+  .dragging .handle, .dragging { cursor: grabbing; }
+  @media (max-width: 1150px) {
+    main { grid-template-columns: 1fr; }
+    .views { grid-template-columns: 1fr; }
+    .viewer { height: 70vh; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Arm placement</h1>
+  <span id="status" class="chip">loading the person…</span>
+  <span id="dirty" class="chip" hidden>unsaved changes</span>
+  <span class="grow"></span>
+  <button id="simulate" title="Run the arms' real motion on the recording with this placement">Simulate</button>
+  <button id="revert" title="Go back to the saved placement">Revert</button>
+  <button id="save" class="primary" title="Save this placement for the live view">Save</button>
+</header>
+<main>
+  <div class="left">
+  <section class="viewer">
+    <div id="view3d"></div>
+    <div class="vmsg" id="vmsg">loading the 3D view…</div>
+    <div class="tools">
+      <button id="m-move" class="on" title="Drag the arrows to move the selected arm (T)">Move</button>
+      <button id="m-turn" title="Drag the ring to turn the selected arm about the vertical (R)">Turn</button>
+      <button id="m-tilt" title="Drag the rings to tip the selected arm's base any way (Y)">Tilt</button>
+      <button id="m-start" title="Drag the ring to turn which way the selected arm points when it starts and waits (G)">Start pose</button>
+      <span class="sep"></span>
+      <button id="v-cam" title="Look from where the camera is">Camera view</button>
+      <button id="v-top" title="Look straight down">Top</button>
+      <button id="v-side" title="Look from the person's right">Side</button>
+      <button id="v-flat" title="Show the flat top and side views as well">Flat views</button>
+    </div>
+    <div class="hint">Click an arm to pick it · drag the handles to move or turn it ·
+      drag empty space to look around · right-drag to pan · wheel to zoom · Shift snaps</div>
+  </section>
+  <section class="views" hidden>
+    <div class="view">
+      <div class="vtitle">From above <small>camera at the top · drag a base to move it, the small handle to turn it</small></div>
+      <svg id="top"></svg>
+    </div>
+    <div class="view">
+      <div class="vtitle">From the person's right <small>camera to the right · drag an arm up or down</small></div>
+      <svg id="side"></svg>
+    </div>
+  </section>
+  </div>
+  <aside>
+    <div class="card" id="summary"><h2>This placement</h2><div class="muted">checking…</div></div>
+    <div class="card" id="warnings" hidden><h2>Check</h2><ul class="msgs"></ul></div>
+    <div class="card"><h2>Arms</h2><div id="arms"></div>
+      <button id="add" title="Add an arm where it is furthest from the others">Add an arm</button></div>
+    <div class="card" id="sim" hidden><h2>Simulation</h2><div class="bar"><div></div></div><div class="body"></div></div>
+    <div class="card help">
+      <h2>Keys</h2>
+      <div><kbd>1</kbd>–<kbd>8</kbd> pick an arm · <kbd>T</kbd> move · <kbd>R</kbd> turn · <kbd>Y</kbd> tilt · <kbd>G</kbd> start pose · <kbd>Esc</kbd> let go</div>
+      <div><kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> move it 10 mm (<kbd>Shift</kbd> 50) · <kbd>W</kbd> <kbd>S</kbd> raise or lower it</div>
+      <div><kbd>Q</kbd> <kbd>E</kbd> turn it 5° (<kbd>Shift</kbd> 15°) · <kbd>Z</kbd> <kbd>C</kbd> turn its start pose 15° (<kbd>Shift</kbd> 45°) · Hold <kbd>Shift</kbd> while dragging to snap to 50 mm or 15°.</div>
+      <div class="faint">Start pose: which way each arm points when it starts, waits and
+        finishes, from straight ahead (0) to 88° either side (+ is the arm's left). The
+        white arrow shows it. At power-up a real arm first points straight ahead by
+        itself; the live view then turns it.</div>
+      <div class="faint" id="savepath"></div>
+    </div>
+  </aside>
+</main>
+<script>
+"use strict";
+const NS = "http://www.w3.org/2000/svg";
+const COLORS = ["rgb(232,92,74)", "rgb(74,160,232)", "rgb(108,199,122)", "rgb(232,176,74)"];
+const GREY = "#5f6673";
+const $ = (s) => document.querySelector(s);
+
+let scene = null;          // from /api/scene
+let arms = [];             // the placement being edited
+let savedJson = "";        // the placement as last saved or loaded
+let sel = 0;               // selected arm
+let check = null;          // last check result
+let checkSeq = 0, checkTimer = null, checking = false;
+let drag = null;
+
+// ---------- coordinates ------------------------------------------------------
+// World: x toward the camera, y the person's left, z up; mm from the seat.
+// Top view: camera at the top, the person's left on the left.
+const topUV = (x, y) => [-y, -x];
+const topXY = (u, v) => [-v, -u];
+// Side view, from the person's right: camera to the right.
+const sideUV = (x, z) => [x, -z];
+
+function el(tag, attrs, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function svgPoint(svg, evt) {
+  const p = svg.createSVGPoint();
+  p.x = evt.clientX; p.y = evt.clientY;
+  return p.matrixTransform(svg.getScreenCTM().inverse());
+}
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const wrap = (d) => ((d + 180) % 360 + 360) % 360 - 180;
+const color = (a) => COLORS[a % 4];
+const name = (a) => scene.names[a % 4];
+const round1 = (v) => Math.round(v * 10) / 10;
+
+// ---------- the two views ---------------------------------------------------
+// The views are in mm; labels, lines and handles are sized in screen pixels,
+// so they stay readable and grabbable at any window size.
+let topBox, sideBox;
+const K = { top: 6, side: 6 };          // mm per screen pixel
+function measure() {
+  const t = $("#top"), s = $("#side");
+  if (t.clientWidth) K.top = topBox.w / t.clientWidth;
+  if (s.clientWidth) K.side = sideBox.w / s.clientWidth;
+}
+function setupViews() {
+  const g = scene.geometry;
+  const camX = g.camera.x;
+  const xMax = Math.max(1300, camX + 250), xMin = -1100;
+  topBox = { u0: -1400, v0: -xMax, w: 2800, h: xMax - xMin };
+  sideBox = { u0: xMin, v0: -1850, w: xMax - xMin, h: 1950 };
+  $("#top").setAttribute("viewBox", `${topBox.u0} ${topBox.v0} ${topBox.w} ${topBox.h}`);
+  $("#side").setAttribute("viewBox", `${sideBox.u0} ${sideBox.v0} ${sideBox.w} ${sideBox.h}`);
+}
+
+function grid(svg, box, k, labels) {
+  const gr = el("g", {}, svg);
+  const step = 100;
+  for (let u = Math.ceil(box.u0 / step) * step; u <= box.u0 + box.w; u += step)
+    el("line", { x1: u, y1: box.v0, x2: u, y2: box.v0 + box.h,
+      stroke: u % 500 ? "#1a1f27" : "#262c37", "stroke-width": (u ? 1 : 2) * k }, gr);
+  for (let v = Math.ceil(box.v0 / step) * step; v <= box.v0 + box.h; v += step)
+    el("line", { x1: box.u0, y1: v, x2: box.u0 + box.w, y2: v,
+      stroke: v % 500 ? "#1a1f27" : "#262c37", "stroke-width": (v ? 1 : 2) * k }, gr);
+  if (labels) labels(gr);
+  return gr;
+}
+function poly(pts, map, attrs, parent) {
+  if (!pts || pts.length < 3) return null;
+  return el("polygon", Object.assign({ points: pts.map(p => map(p[0], p[1]).join(",")).join(" ") },
+    attrs), parent);
+}
+function text(parent, u, v, s, size, attrs) {
+  const t = el("text", Object.assign({ x: u, y: v, fill: "#8a93a1", "font-size": size,
+    "font-family": "Segoe UI, sans-serif" }, attrs || {}), parent);
+  t.textContent = s;
+  return t;
+}
+
+function drawTop() {
+  const svg = $("#top"), g = scene.geometry, k = K.top;
+  svg.replaceChildren();
+  const b = topBox;
+  grid(svg, b, k, (gr) => {
+    text(gr, b.u0 + 8 * k, b.v0 + 18 * k, "camera ↑", 12 * k);
+    text(gr, b.u0 + 8 * k, b.v0 + b.h - 8 * k, "← the person's left", 12 * k);
+    text(gr, b.u0 + b.w - 8 * k, b.v0 + b.h - 8 * k, "the person's right →", 12 * k,
+      { "text-anchor": "end" });
+    text(gr, b.u0 + b.w - 8 * k, b.v0 + 18 * k, "grid 10 cm", 11 * k, { "text-anchor": "end" });
+  });
+  // camera and what it sees
+  const c = g.camera, [cu, cv] = topUV(c.x, c.y);
+  const ang = Math.atan2(c.dy, c.dx), half = 43.5 * Math.PI / 180, L = 1700;
+  const a1 = topUV(c.x + L * Math.cos(ang - half), c.y + L * Math.sin(ang - half));
+  const a2 = topUV(c.x + L * Math.cos(ang + half), c.y + L * Math.sin(ang + half));
+  el("polygon", { points: `${cu},${cv} ${a1.join(",")} ${a2.join(",")}`,
+    fill: "rgba(110,168,254,0.05)", stroke: "rgba(110,168,254,0.25)", "stroke-width": k }, svg);
+  el("rect", { x: cu - 13 * k, y: cv - 5 * k, width: 26 * k, height: 10 * k, rx: 2 * k,
+    fill: "#6ea8fe" }, svg);
+  text(svg, cu + 17 * k, cv + 4 * k, "camera", 12 * k, { fill: "#6ea8fe" });
+  // chair, then the person from the lowest part up
+  for (const p of g.chair_top) poly(p, topUV, { fill: "var(--chair)", stroke: "#5a5f6b",
+    "stroke-width": k }, svg);
+  const parts = [...g.top].sort((p, q) => p.z - q.z);
+  for (const p of parts) poly(p.pts, topUV, { fill: "var(--skin)", "fill-opacity": 0.92,
+    stroke: "#8f7462", "stroke-width": k }, svg);
+  // the scrub cells, coloured by who reaches them
+  const cells = el("g", {}, svg);
+  if (check && check.owner) {
+    g.cells.forEach((p, i) => {
+      const o = check.owner[i];
+      if (o < 0 || !check.ok[i]) return;
+      const [u, v] = topUV(p[0], p[1]);
+      el("circle", { cx: u, cy: v, r: Math.max(7, 1.8 * k), fill: color(o),
+        "fill-opacity": 0.9 }, cells);
+    });
+  }
+  // the seat point, which the arms' numbers are measured from (the seat,
+  // under the back), and the middle of the seat itself
+  el("path", { d: `M${-6 * k} 0 H${6 * k} M0 ${-6 * k} V${6 * k}`, stroke: "#8a93a1",
+    "stroke-width": 1.5 * k }, svg);
+  text(svg, 7 * k, 14 * k, "0, 0 (under your back)", 10 * k, { fill: "#8a93a1" });
+  const seatBox = g.chair_top[0];
+  if (seatBox && seatBox.length) {
+    const mx = seatBox.reduce((s, p) => s + p[0], 0) / seatBox.length;
+    const my = seatBox.reduce((s, p) => s + p[1], 0) / seatBox.length;
+    const [mu, mv] = topUV(mx, my);
+    el("circle", { cx: mu, cy: mv, r: 3 * k, fill: "none", stroke: "#c9ced6",
+      "stroke-width": 1.2 * k }, svg);
+    text(svg, mu + 5 * k, mv + 4 * k, "middle of the seat", 10 * k, { fill: "#c9ced6" });
+  }
+  // arms, the selected one last so it is on top
+  const order = arms.map((r, a) => a).filter(a => a !== sel).concat([sel]);
+  const labels = [];
+  for (const a of order) if (arms[a]) labels.push(drawTopArm(svg, arms[a], a, k));
+  drawLabels(svg, labels, k);
+}
+
+// Arm names, over everything, moved down where two would overlap, with a
+// dark edge so they read over the person.
+function drawLabels(svg, labels, k) {
+  const placed = [];
+  for (const L of [...labels].sort((p, q) => p.v - q.v)) {
+    L.w = L.s.length * 0.58 * L.size;
+    for (let i = 0; i < 12; i++) {
+      const hit = placed.find(p => p.u < L.u + L.w && L.u < p.u + p.w &&
+        Math.abs(p.v - L.v) < 1.15 * L.size);
+      if (!hit) break;
+      L.v = hit.v + 1.15 * L.size;
+    }
+    placed.push(L);
+    text(svg, L.u, L.v, L.s, L.size, { fill: color(L.a), "font-weight": 600,
+      stroke: "#0f1115", "stroke-width": 3 * k, "paint-order": "stroke",
+      "pointer-events": "none" });
+  }
+}
+
+function wedge(cx, cy, R, a0, a1) {
+  const p0 = [cx + R * Math.cos(a0), cy + R * Math.sin(a0)];
+  const p1 = [cx + R * Math.cos(a1), cy + R * Math.sin(a1)];
+  return `M${cx},${cy} L${p0.join(",")} A${R},${R} 0 0 1 ${p1.join(",")} Z`;
+}
+
+function drawTopArm(svg, r, a, k) {
+  const g = el("g", { "data-arm": a }, svg);
+  const x = r.x_from_seat_mm, y = r.y_from_seat_mm, f = r.facing_deg * Math.PI / 180;
+  const [u, v] = topUV(x, y);
+  const R = scene.reach_mm + 10;
+  const info = (check && check.arms && check.arms[a]) || {};
+  // Where the base can turn to: +-90 degrees about its facing.
+  const fu = -Math.sin(f), fv = -Math.cos(f);            // facing, on screen
+  const af = Math.atan2(fv, fu);
+  el("path", { d: wedge(u, v, R, af - Math.PI / 2, af + Math.PI / 2),
+    fill: color(a), "fill-opacity": a === sel ? 0.12 : 0.05, stroke: "none" }, g);
+  el("circle", { cx: u, cy: v, r: R, fill: "none", stroke: color(a), "stroke-opacity": 0.45,
+    "stroke-width": 1.2 * k, "stroke-dasharray": `${6 * k} ${4 * k}` }, g);
+  // where it waits
+  if (info.park) {
+    const [pu, pv] = topUV(info.park[0], info.park[1]);
+    el("line", { x1: u, y1: v, x2: pu, y2: pv, stroke: color(a), "stroke-width": k,
+      "stroke-opacity": 0.6, "stroke-dasharray": `${3 * k} ${3 * k}` }, g);
+    el("circle", { cx: pu, cy: pv, r: 4 * k, fill: "none", stroke: color(a),
+      "stroke-width": 1.5 * k }, g);
+  }
+  const reachOut = Math.max(200, 38 * k);
+  const hx = u + fu * reachOut, hy = v + fv * reachOut;
+  el("line", { x1: u, y1: v, x2: hx, y2: hy, stroke: color(a), "stroke-width": 3 * k,
+    "stroke-linecap": "round" }, g);
+  const base = el("circle", { cx: u, cy: v, r: Math.max(scene.base_r_mm + 5, 10 * k),
+    fill: color(a), stroke: a === sel ? "#ffffff" : "#0f1115",
+    "stroke-width": (a === sel ? 2.5 : 1.5) * k, class: "handle" }, g);
+  const turn = el("circle", { cx: hx, cy: hy, r: 7 * k, fill: "#0f1115", stroke: color(a),
+    "stroke-width": 2.5 * k, class: "handle" }, g);
+  el("title", {}, base).textContent = `${name(a)}: drag to move`;
+  el("title", {}, turn).textContent = `${name(a)}: drag to turn (Shift snaps to 15°)`;
+  base.addEventListener("pointerdown", (e) => startDrag(e, "move", a, $("#top")));
+  turn.addEventListener("pointerdown", (e) => startDrag(e, "turn", a, $("#top")));
+  return { a, u: u + 13 * k, v: v - 12 * k, size: 13 * k,
+    s: name(a) + (info.still ? " (stays still)" : "") };
+}
+
+function drawSide() {
+  const svg = $("#side"), g = scene.geometry, k = K.side, b = sideBox;
+  svg.replaceChildren();
+  grid(svg, b, k, (gr) => {
+    text(gr, b.u0 + b.w - 8 * k, b.v0 + 18 * k, "camera →", 12 * k, { "text-anchor": "end" });
+    text(gr, b.u0 + 8 * k, b.v0 + 18 * k, "height above the floor", 12 * k);
+  });
+  el("line", { x1: b.u0, y1: 0, x2: b.u0 + b.w, y2: 0, stroke: "#6b5a4a",
+    "stroke-width": 2 * k }, svg);
+  const c = g.camera, [cu, cv] = sideUV(c.x, c.z);
+  el("rect", { x: cu - 5 * k, y: cv - 13 * k, width: 10 * k, height: 26 * k, rx: 2 * k,
+    fill: "#6ea8fe" }, svg);
+  for (const p of g.chair_side) poly(p, sideUV, { fill: "var(--chair)", stroke: "#5a5f6b",
+    "stroke-width": k }, svg);
+  // the far side first, so the person's right is in front
+  const parts = [...g.side].sort((p, q) => q.y - p.y);
+  for (const p of parts) poly(p.pts, sideUV, { fill: "var(--skin)", "fill-opacity": 0.92,
+    stroke: "#8f7462", "stroke-width": k }, svg);
+  if (g.head_z) {
+    el("line", { x1: b.u0, y1: -g.head_z, x2: b.u0 + b.w, y2: -g.head_z,
+      stroke: "rgba(240,106,106,.45)", "stroke-width": k,
+      "stroke-dasharray": `${6 * k} ${4 * k}` }, svg);
+    text(svg, b.u0 + 8 * k, -g.head_z - 4 * k, "no sponge above here (the head)", 11 * k,
+      { fill: "#c98080" });
+  }
+  // arms: the one nearest the viewer (most to the person's right) last,
+  // and the selected one on top of all
+  const order = arms.map((r, a) => a)
+    .sort((p, q) => arms[q].y_from_seat_mm - arms[p].y_from_seat_mm)
+    .filter(a => a !== sel).concat([sel]);
+  const labels = [];
+  for (const a of order) if (arms[a]) labels.push(drawSideArm(svg, arms[a], a, k));
+  drawLabels(svg, labels, k);
+}
+
+function drawSideArm(svg, r, a, k) {
+  const g = el("g", {}, svg);
+  const x = r.x_from_seat_mm, z = r.z_mm;
+  const [u, v] = sideUV(x, z);
+  const info = (check && check.arms && check.arms[a]) || {};
+  el("line", { x1: u, y1: 0, x2: u, y2: v, stroke: color(a), "stroke-width": 3 * k,
+    "stroke-opacity": 0.6 }, g);
+  el("circle", { cx: u, cy: v - 123, r: scene.reach_mm, fill: "none", stroke: color(a),
+    "stroke-opacity": a === sel ? 0.5 : 0.25, "stroke-width": 1.2 * k,
+    "stroke-dasharray": `${6 * k} ${4 * k}` }, g);
+  if (info.park) {
+    const [pu, pv] = sideUV(info.park[0], info.park[2]);
+    el("circle", { cx: pu, cy: pv, r: 4 * k, fill: "none", stroke: color(a),
+      "stroke-width": 1.5 * k }, g);
+  }
+  const w = Math.max(90, 14 * k), h = Math.max(123, 18 * k);
+  const block = el("rect", { x: u - w / 2, y: v - h, width: w, height: h, rx: 2 * k,
+    fill: color(a), stroke: a === sel ? "#ffffff" : "#0f1115",
+    "stroke-width": (a === sel ? 2.5 : 1.5) * k, class: "handle" }, g);
+  el("title", {}, block).textContent = `${name(a)}: drag up or down to set its height`;
+  block.addEventListener("pointerdown", (e) => startDrag(e, "height", a, $("#side")));
+  return { a, u: u + w / 2 + 5 * k, v: v - h / 2 + 4 * k, size: 12 * k,
+    s: `${name(a)} ${Math.round(z)} mm` };
+}
+
+// ---------- dragging ----------------------------------------------------------
+function startDrag(e, mode, a, svg) {
+  e.preventDefault();
+  e.stopPropagation();
+  // A field being typed in takes its value now, not halfway through the drag.
+  if (document.activeElement && document.activeElement.tagName === "INPUT")
+    document.activeElement.blur();
+  select(a, false);
+  const p = svgPoint(svg, e);
+  const r = arms[a];
+  drag = { mode, a, svg, id: e.pointerId, start: JSON.stringify(r) };
+  if (mode === "move") {
+    const [u, v] = topUV(r.x_from_seat_mm, r.y_from_seat_mm);
+    drag.du = u - p.x; drag.dv = v - p.y;
+  } else if (mode === "height") {
+    drag.dz = r.z_mm + p.y;
+  }
+  svg.setPointerCapture(e.pointerId);
+  document.body.classList.add("dragging");
+}
+
+function onMove(e) {
+  if (!drag || e.pointerId !== drag.id) return;
+  const p = svgPoint(drag.svg, e), r = arms[drag.a], L = scene.limits;
+  if (drag.mode === "move") {
+    const [x, y] = topXY(p.x + drag.du, p.y + drag.dv);
+    r.x_from_seat_mm = round1(clamp(Math.round(x / 5) * 5, -L.xy, L.xy));
+    r.y_from_seat_mm = round1(clamp(Math.round(y / 5) * 5, -L.xy, L.xy));
+  } else if (drag.mode === "turn") {
+    const [x, y] = topXY(p.x, p.y);
+    let f = Math.atan2(y - r.y_from_seat_mm, x - r.x_from_seat_mm) * 180 / Math.PI;
+    f = e.shiftKey ? Math.round(f / 15) * 15 : Math.round(f);
+    r.facing_deg = wrap(f);
+  } else if (drag.mode === "height") {
+    const z = drag.dz - p.y;
+    r.z_mm = round1(clamp(Math.round(z / 5) * 5, L.z_min, L.z_max));
+  }
+  changed(false);
+}
+
+function endDrag(e) {
+  if (!drag || e.pointerId !== drag.id) return;
+  const moved = drag.start !== JSON.stringify(arms[drag.a]);
+  try { drag.svg.releasePointerCapture(drag.id); } catch (_) {}
+  drag = null;
+  document.body.classList.remove("dragging");
+  if (moved) changed(true);
+}
+
+// ---------- the panel --------------------------------------------------------
+// The cards are built once and then only updated, so typing in a field and
+// tabbing to the next keeps working while the views redraw.
+function buildArms() {
+  const box = $("#arms");
+  box.replaceChildren();
+  arms.forEach((_r, a) => {
+    const d = document.createElement("div");
+    d.className = "arm";
+    d.innerHTML = `<div class="hd"><span class="dot" style="background:${color(a)}"></span>
+      <span>${a + 1} · ${name(a)}</span><span class="grow"></span>
+      <span class="muted reach"></span>
+      <button class="rm" title="Remove this arm. The arms after it move up one, and take its colour.">✕</button></div>
+      <div class="fields">
+        ${field("forward", "x_from_seat_mm")}${field("left", "y_from_seat_mm")}
+        ${field("height", "z_mm")}${field("facing °", "facing_deg")}
+        ${field("tilt °", "tilt_deg")}${field("roll °", "roll_deg")}
+        ${field("start °", "start_deg")}
+      </div>
+      <div class="still" hidden></div>`;
+    d.addEventListener("click", (e) => {
+      if (e.target.tagName !== "INPUT" && e.target.tagName !== "BUTTON") select(a);
+    });
+    const rm = d.querySelector("button.rm");
+    rm.disabled = arms.length <= 1;
+    rm.addEventListener("click", () => removeArm(a));
+    d.querySelectorAll("input").forEach((inp) => {
+      inp.addEventListener("focus", () => { if (sel !== a) select(a); });
+      inp.addEventListener("keydown", (e) => {        // Enter takes the value
+        if (e.key === "Enter") inp.blur();
+      });
+      inp.addEventListener("change", () => {
+        const r = arms[a], k = inp.dataset.k, L = scene.limits;
+        const v = parseFloat(inp.value);
+        if (!r) return;
+        if (!isFinite(v)) { inp.value = Math.round(r[k] || 0); return; }
+        if (k === "facing_deg" || k === "tilt_deg" || k === "roll_deg") r[k] = round1(wrap(v));
+        else if (k === "start_deg") r[k] = round1(clamp(v, -L.start, L.start));
+        else if (k === "z_mm") r[k] = round1(clamp(v, L.z_min, L.z_max));
+        else r[k] = round1(clamp(v, -L.xy, L.xy));
+        inp.value = Math.round(r[k] || 0);
+        sel = a;
+        changed(true);
+      });
+    });
+    box.appendChild(d);
+  });
+}
+function removeArm(a) {
+  if (arms.length <= 1) return;
+  arms.splice(a, 1);
+  sel = Math.min(sel > a ? sel - 1 : sel, arms.length - 1);
+  buildArms();
+  changed(true);
+}
+
+function addArm() {
+  if (arms.length >= scene.limits.arms_max) return;
+  // Around the seat, where it is furthest from every other base.
+  let best = null;
+  for (let k = 0; k < 24; k++) {
+    const t = (k / 24) * 2 * Math.PI, x = 650 * Math.cos(t), y = 650 * Math.sin(t);
+    const d = Math.min(...arms.map(r => Math.hypot(r.x_from_seat_mm - x, r.y_from_seat_mm - y)));
+    if (!best || d > best.d) best = { x, y, d };
+  }
+  const used = new Set(arms.map(r => r.id));
+  let n = arms.length;
+  while (used.has(`a${n}`)) n++;
+  arms.push({ id: `a${n}`, x_from_seat_mm: round1(best.x), y_from_seat_mm: round1(best.y),
+    z_mm: 900, facing_deg: round1(wrap(Math.atan2(-best.y, -best.x) * 180 / Math.PI)),
+    tilt_deg: 0, roll_deg: 0, start_deg: 0 });
+  sel = arms.length - 1;
+  buildArms();
+  changed(true);
+}
+
+function drawArms() {
+  const box = $("#arms");
+  if (box.children.length !== arms.length) buildArms();
+  $("#add").disabled = !scene || arms.length >= scene.limits.arms_max;
+  arms.forEach((r, a) => {
+    const d = box.children[a];
+    const info = (check && check.arms && check.arms[a]) || {};
+    d.classList.toggle("sel", a === sel);
+    d.querySelector(".reach").textContent = info.reach_cm2 != null ? `${info.reach_cm2} cm²` : "";
+    const still = d.querySelector(".still");
+    still.textContent = info.still ? `Stays still: ${info.still}` : "";
+    still.hidden = !info.still;
+    d.querySelectorAll("input").forEach((inp) => {
+      if (inp !== document.activeElement) inp.value = Math.round(r[inp.dataset.k] || 0);
+    });
+  });
+}
+function field(label, k) {
+  return `<div><label>${label}</label><input data-k="${k}" type="number"
+    step="${k.endsWith("_deg") ? 1 : 10}"></div>`;
+}
+
+function drawSummary() {
+  const s = $("#summary");
+  if (!check) { s.innerHTML = `<h2>This placement</h2><div class="muted">checking…</div>`; return; }
+  if (check.error) { s.innerHTML = `<h2>This placement</h2><div class="muted">${esc(check.error)}</div>`; return; }
+  if (check.coverage == null) {
+    s.innerHTML = `<h2>This placement</h2><div class="big" style="color:var(--bad)">Cannot be used</div>
+      <div class="muted">Fix what the check says, then it is checked again.</div>`;
+    return;
+  }
+  const g = scene.geometry;
+  const per = (check.arms || []).map((x, a) =>
+    `<span style="color:${color(a)}">${name(a)} ${x.reach_cm2 ?? 0}</span>`).join(" · ");
+  const ph = check.phases || [];
+  const turns = ph.length === 1 ? `all at once (${ph[0].map(name).join(", ")})`
+    : ph.map(p => p.map(name).join(" + ")).join(", then ");
+  const cam = check.camera_blocked != null ? `${Math.round(100 * check.camera_blocked)}%` : "?";
+  s.innerHTML = `<h2>This placement</h2>
+    <div><span class="big">${Math.round(100 * check.coverage)}%</span>
+      <span class="muted">of the upper body (${g.area_cm2} cm²) the arms can scrub safely</span></div>
+    <div style="margin-top:6px">cm² each: ${per}</div>
+    <div class="muted" style="margin-top:4px">Scrubbing: ${turns || "no arm has work"}</div>
+    <div class="muted">The arms hide ${cam} of the person from the camera.</div>
+    <div class="faint">Skin: in an arm's colour where it scrubs now, faded where it takes over
+      once the person moves, grey where no arm can reach.</div>
+    <div class="faint">checked in ${check.seconds}s</div>`;
+}
+
+function drawWarnings() {
+  const box = $("#warnings"), ul = box.querySelector("ul");
+  ul.replaceChildren();
+  const items = [];
+  if (check) {
+    for (const m of check.blocking || []) items.push(["bad", m]);
+    for (const m of check.warnings || []) items.push(["warn", m]);
+  }
+  box.hidden = !items.length;
+  for (const [k, m] of items) {
+    const li = document.createElement("li");
+    li.className = k;
+    li.textContent = m;
+    ul.appendChild(li);
+  }
+  $("#save").disabled = !check || checking || !!(check.blocking && check.blocking.length) || !isDirty();
+  $("#save").title = check && check.blocking && check.blocking.length
+    ? "This placement cannot be used: " + check.blocking[0]
+    : "Save this placement for the live view";
+}
+
+function esc(s) { return String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+function isDirty() { return JSON.stringify(arms) !== savedJson; }
+
+const flatShown = () => !$(".views").hidden;
+function view3d() { if (window.V3 && window.V3.ready) window.V3.refresh(); }
+function drawFlat() { if (flatShown()) { drawTop(); drawSide(); } }
+function drawAll() {
+  drawFlat();
+  view3d();
+  drawArms();
+  drawSummary();
+  drawWarnings();
+  $("#dirty").hidden = !isDirty();
+}
+
+function select(a, redraw = true) {
+  sel = a;
+  if (redraw) drawAll();
+}
+
+// ---------- checking, saving, simulating ---------------------------------------
+function status(msg, kind) {
+  const s = $("#status");
+  s.textContent = msg;
+  s.className = "chip" + (kind ? " " + kind : "");
+}
+
+function changed(settled) {
+  $("#dirty").hidden = !isDirty();
+  drawFlat();
+  view3d();
+  if (settled) {
+    drawArms();
+    scheduleCheck();
+  }
+}
+
+function scheduleCheck() {
+  clearTimeout(checkTimer);
+  checkTimer = setTimeout(runCheck, 350);
+}
+
+async function runCheck() {
+  const seq = ++checkSeq;
+  const asked = arms.map((r) => r.start_deg || 0);
+  checking = true;
+  status("checking…");
+  drawWarnings();
+  try {
+    const res = await fetch("/api/check", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ arms }) });
+    const data = await res.json();
+    if (seq !== checkSeq) return;
+    check = res.ok ? data : { error: data.error || res.statusText, warnings: [], blocking: [] };
+    check.asked = asked;
+    const bad = check.blocking && check.blocking.length;
+    status(bad ? "cannot be used" : (check.error ? "check failed" : "checked"), bad || check.error ? "bad" : "good");
+  } catch (err) {
+    if (seq !== checkSeq) return;
+    check = { error: String(err), warnings: [], blocking: [] };
+    status("the editor stopped", "bad");
+  } finally {
+    if (seq === checkSeq) {
+      checking = false;
+      drawAll();
+    }
+  }
+}
+
+async function save() {
+  $("#save").disabled = true;
+  status("saving…");
+  const res = await fetch("/api/save", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ arms }) });
+  const data = await res.json();
+  if (res.ok && data.saved) {
+    savedJson = JSON.stringify(arms);
+    status(`saved ${new Date().toLocaleTimeString()}; a running live view picks it up`, "good");
+  } else {
+    status("not saved: " + (data.why ? data.why.join("; ") : data.error), "bad");
+  }
+  drawAll();
+}
+
+async function revert() {
+  const res = await fetch("/api/scene");
+  const data = await res.json();
+  arms = data.rig.arms.map(normal);
+  savedJson = JSON.stringify(arms);
+  drawAll();
+  scheduleCheck();
+}
+
+function normal(r, k) {
+  return { id: r.id || `a${k}`, x_from_seat_mm: +r.x_from_seat_mm, y_from_seat_mm: +r.y_from_seat_mm,
+    z_mm: +r.z_mm, facing_deg: +r.facing_deg, tilt_deg: +(r.tilt_deg || 0),
+    roll_deg: +(r.roll_deg || 0), start_deg: +(r.start_deg || 0) };
+}
+
+let simTimer = null;
+async function simulate() {
+  const box = $("#sim");
+  box.hidden = false;
+  box.querySelector(".body").innerHTML = `<div class="muted">running the arms on the recording…</div>`;
+  box.querySelector(".bar > div").style.width = "0%";
+  $("#simulate").disabled = true;
+  try {
+    const res = await fetch("/api/simulate", { method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ arms, loops: SIM_LOOPS }) });
+    if (res.status === 409)
+      box.querySelector(".body").innerHTML = `<div class="muted">a simulation is already running; showing it</div>`;
+    else if (!res.ok) throw new Error((await res.json()).error || res.statusText);
+  } catch (err) {
+    box.querySelector(".body").innerHTML = `<pre>${esc(err)}</pre>`;
+    $("#simulate").disabled = false;
+    return;
+  }
+  clearInterval(simTimer);
+  simTimer = setInterval(pollSim, 600);
+}
+
+const SIM_LOOPS = 3;       // three times through the 25 s recording
+function doneList(done) {
+  return Object.entries(done).map(([a, v]) =>
+    `<span style="color:${color(+a)}">${name(+a)} ${Math.round(100 * v)}%</span>`).join(", ");
+}
+
+async function pollSim() {
+  const box = $("#sim"), body = box.querySelector(".body");
+  let st;
+  try {
+    st = await (await fetch("/api/simulate")).json();
+  } catch (err) {
+    clearInterval(simTimer);
+    $("#simulate").disabled = false;
+    body.innerHTML = `<pre>could not read the simulation: ${esc(err)}</pre>`;
+    return;
+  }
+  box.querySelector(".bar > div").style.width = `${Math.round(100 * (st.progress || 0))}%`;
+  if (st.running) return;
+  clearInterval(simTimer);
+  $("#simulate").disabled = false;
+  if (st.error) { body.innerHTML = `<pre>${esc(st.error)}</pre>`; return; }
+  const r = st.result;
+  if (!r) return;
+  const problems = [];
+  if (r.errors.length) problems.push("the motion code crashed");
+  if (r.estop) problems.push("the fleet stopped");
+  if (r.stalled) problems.push("a turn never finished");
+  if (r.jumps) problems.push(`${r.jumps} jumps`);
+  if (r.own_inside) problems.push(`${r.own_inside} moves into the person`);
+  if (r.own_close) problems.push(`${r.own_close} moves too close to another arm`);
+  const passes = r.passes.map(p => `pass ${p.pass}, turn ${p.phase}: ${doneList(p.done)}`);
+  if (r.unfinished)
+    passes.push(`pass ${r.unfinished.pass}, turn ${r.unfinished.phase}, still going when the run ended: `
+      + doneList(r.unfinished.done));
+  const still = Object.entries(r.still || {}).map(([a, why]) =>
+    `<div class="still">${name(+a)} stayed still: ${esc(why)}</div>`).join("");
+  const v = r.verdicts || {};
+  const gap = r.min_gap_mm == null ? "never near each other" : `${(r.min_gap_mm / 10).toFixed(1)} cm`;
+  body.innerHTML = `
+    <div class="big" style="color:${problems.length ? "var(--bad)" : "var(--ok)"}">
+      ${problems.length ? "Problems" : "The arms ran cleanly"}</div>
+    ${problems.length ? `<div style="color:var(--bad)">${problems.join(", ")}</div>` : ""}
+    <div class="muted" style="margin-top:4px">${SIM_LOOPS} times through the recording with this
+      placement. Scrubbed, of what each arm can reach:</div>
+    <div>${passes.join("<br>") || "no turn finished"}</div>
+    ${still}
+    <div class="muted" style="margin-top:4px">Closest two arms: ${gap} · held ${(v.hold || 0) + (v.retreat || 0)}
+      · skipped ${v.refuse || 0} moves too close to the person
+      · moved out of the way ${v["moved out of the way"] || 0}</div>
+    <details><summary class="faint">details</summary><pre>${esc(r.text)}</pre></details>`;
+}
+
+// ---------- keys ------------------------------------------------------------
+document.addEventListener("keydown", (e) => {
+  if (!scene || e.target.tagName === "INPUT") return;
+  const r = arms[sel];
+  if (!r) return;
+  const big = e.shiftKey, L = scene.limits;
+  let done = true;
+  switch (e.key) {
+    case "1": case "2": case "3": case "4": case "5": case "6": case "7": case "8": {
+      const a = +e.key - 1;
+      if (a < arms.length) select(a);
+      return;
+    }
+    case "ArrowUp": r.x_from_seat_mm = clamp(r.x_from_seat_mm + (big ? 50 : 10), -L.xy, L.xy); break;
+    case "ArrowDown": r.x_from_seat_mm = clamp(r.x_from_seat_mm - (big ? 50 : 10), -L.xy, L.xy); break;
+    case "ArrowLeft": r.y_from_seat_mm = clamp(r.y_from_seat_mm + (big ? 50 : 10), -L.xy, L.xy); break;
+    case "ArrowRight": r.y_from_seat_mm = clamp(r.y_from_seat_mm - (big ? 50 : 10), -L.xy, L.xy); break;
+    case "t": case "T": if (window.V3) window.V3.mode("move"); return;
+    case "r": case "R": if (window.V3) window.V3.mode("turn"); return;
+    case "y": case "Y": if (window.V3) window.V3.mode("tilt"); return;
+    case "g": case "G": if (window.V3) window.V3.mode("start"); return;
+    case "z": case "Z": r.start_deg = clamp((r.start_deg || 0) - (big ? 45 : 15), -L.start, L.start); break;
+    case "c": case "C": r.start_deg = clamp((r.start_deg || 0) + (big ? 45 : 15), -L.start, L.start); break;
+    case "Escape": if (window.V3) window.V3.letGo(); return;
+    case "q": case "Q": r.facing_deg = wrap(r.facing_deg - (big ? 15 : 5)); break;
+    case "e": case "E": r.facing_deg = wrap(r.facing_deg + (big ? 15 : 5)); break;
+    case "w": case "W": r.z_mm = clamp(r.z_mm + (big ? 50 : 10), L.z_min, L.z_max); break;
+    case "s": case "S": r.z_mm = clamp(r.z_mm - (big ? 50 : 10), L.z_min, L.z_max); break;
+    default: done = false;
+  }
+  for (const k of ["x_from_seat_mm", "y_from_seat_mm", "z_mm", "facing_deg", "tilt_deg", "roll_deg",
+                   "start_deg"])
+    r[k] = round1(r[k] || 0);
+  if (done) {
+    e.preventDefault();
+    changed(true);
+  }
+});
+
+// ---------- start ----------------------------------------------------------------
+for (const id of ["#top", "#side"]) {
+  $(id).addEventListener("pointermove", onMove);
+  $(id).addEventListener("pointerup", endDrag);
+  $(id).addEventListener("pointercancel", endDrag);
+}
+$("#save").addEventListener("click", save);
+$("#revert").addEventListener("click", revert);
+$("#simulate").addEventListener("click", simulate);
+$("#add").addEventListener("click", addArm);
+$("#v-flat").addEventListener("click", () => {
+  const v = $(".views");
+  v.hidden = !v.hidden;
+  $("#v-flat").classList.toggle("on", !v.hidden);
+  if (!v.hidden) { measure(); drawFlat(); }
+});
+window.addEventListener("beforeunload", (e) => {
+  if (isDirty()) { e.preventDefault(); e.returnValue = ""; }
+});
+
+(async function start() {
+  const res = await fetch("/api/scene");
+  scene = await res.json();
+  arms = scene.rig.arms.map(normal);
+  savedJson = JSON.stringify(arms);
+  $("#savepath").textContent = "Saves to " + scene.rig_path;
+  setupViews();
+  measure();
+  status("checking…");
+  drawAll();
+  runCheck();
+  setTimeout(() => {              // the 3D view never came up: the flat views
+    if (window.V3 && (window.V3.ready || window.V3.failed)) return;
+    $("#vmsg").textContent = "The 3D view did not load (it needs the internet once, for three.js). "
+      + "The flat views are below.";
+    if (!flatShown()) $("#v-flat").click();
+  }, 15000);
+  new ResizeObserver(() => {
+    const before = [K.top, K.side];
+    measure();
+    if (before[0] !== K.top || before[1] !== K.side) drawFlat();
+  }).observe(document.querySelector(".views"));
+})();
+</script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+// ---------- the 3D view ------------------------------------------------------------
+// The same placement as the cards, in 3D: pick an arm, then drag its arrows to
+// move it, or its rings to turn or tip it. The skin is painted by the arm that
+// scrubs it, and grey where no arm can reach safely.
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { TransformControls } from "three/addons/controls/TransformControls.js";
+import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
+
+const DEG = Math.PI / 180;
+const box = document.getElementById("view3d");
+const vmsg = document.getElementById("vmsg");
+const V3 = window.V3 = { ready: false, failed: false, refresh() {}, mode() {}, letGo() {} };
+
+try {
+  while (!scene) await new Promise((r) => setTimeout(r, 50));
+  const res = await fetch("/api/mesh3d");
+  if (!res.ok) throw new Error(`the editor answered ${res.status}`);
+  build(await res.json());
+} catch (err) {
+  console.error(err);
+  V3.failed = true;
+  vmsg.hidden = false;
+  vmsg.textContent = `The 3D view could not start (${err && err.message || err}). The flat views are below.`;
+  if (!flatShown()) document.getElementById("v-flat").click();
+}
+
+function geometry(V, F) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(V, 3));
+  if (F && F.length) g.setIndex(F);
+  g.computeVertexNormals();
+  return g;
+}
+
+function label(text, cls) {
+  const d = document.createElement("div");
+  d.className = "lbl3" + (cls ? " " + cls : "");
+  d.textContent = text;
+  return new CSS2DObject(d);
+}
+
+function build(mesh) {
+  THREE.Object3D.DEFAULT_UP.set(0, 0, 1);
+  const g0 = scene.geometry;
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setClearColor(0x11151b);
+  box.appendChild(renderer.domElement);
+  const labels = new CSS2DRenderer();
+  Object.assign(labels.domElement.style, { position: "absolute", inset: "0", pointerEvents: "none" });
+  box.appendChild(labels.domElement);
+
+  const world = new THREE.Scene();
+  world.add(new THREE.HemisphereLight(0xe8eef6, 0x3a332c, 2.2));
+  const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+  sun.position.set(1800, -900, 2600);
+  world.add(sun);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.8);
+  fill.position.set(-1600, 1400, 900);
+  world.add(fill);
+
+  // the floor, a 10 cm grid, and the point the arms are measured from
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(8000, 8000),
+    new THREE.MeshStandardMaterial({ color: 0x141920, roughness: 1 }));
+  floor.position.z = -2;
+  world.add(floor);
+  const grid = new THREE.GridHelper(6000, 60, 0x323b49, 0x1e242d);
+  grid.rotation.x = Math.PI / 2;
+  world.add(grid);
+  world.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-60, 0, 1), new THREE.Vector3(60, 0, 1),
+    new THREE.Vector3(0, -60, 1), new THREE.Vector3(0, 60, 1)]),
+    new THREE.LineBasicMaterial({ color: 0x8a93a1 })));
+  const zero = label("0, 0 (under your back)", "dim");
+  zero.position.set(0, 0, 10);
+  world.add(zero);
+
+  // the person, painted by who scrubs what
+  const SKIN = new THREE.Color("#d4b29c"), NOREACH = new THREE.Color("#6d6660");
+  const body = [];
+  for (const p of mesh.parts) {
+    const g = geometry(p.V, p.F);
+    g.setAttribute("color", new THREE.BufferAttribute(new Float32Array(p.V.length), 3));
+    const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true,
+      roughness: 0.8, side: THREE.DoubleSide }));
+    m.userData.cell = p.cell;
+    world.add(m);
+    body.push(m);
+  }
+  const bb = new THREE.Box3();
+  for (const m of body) bb.expandByObject(m);
+  const mid = bb.isEmpty() ? new THREE.Vector3(110, 0, 700) : bb.getCenter(new THREE.Vector3());
+
+  function paint() {
+    const own = check && check.owner, ok = check && check.ok;
+    const tints = COLORS.map((c) => SKIN.clone().lerp(new THREE.Color(c), 0.78));
+    const faded = COLORS.map((c) => NOREACH.clone().lerp(new THREE.Color(c), 0.35));
+    for (const m of body) {
+      const col = m.geometry.getAttribute("color"), cell = m.userData.cell;
+      for (let i = 0; i < cell.length; i++) {
+        const c = cell[i];
+        let k = SKIN;
+        if (c >= 0 && own && c < own.length)
+          k = own[c] < 0 ? NOREACH : ok[c] ? tints[own[c] % 4] : faded[own[c] % 4];
+        col.setXYZ(i, k.r, k.g, k.b);
+      }
+      col.needsUpdate = true;
+    }
+  }
+
+  if (mesh.chair) {
+    world.add(new THREE.Mesh(geometry(mesh.chair.V, mesh.chair.F),
+      new THREE.MeshStandardMaterial({ color: 0x4a4f5c, roughness: 0.9, side: THREE.DoubleSide })));
+  }
+
+  // no sponge above this height (the head)
+  if (g0.head_z) {
+    const pts = [];
+    for (let k = 0; k <= 64; k++) {
+      const t = (k / 64) * 2 * Math.PI;
+      pts.push(new THREE.Vector3(mid.x + 420 * Math.cos(t), mid.y + 420 * Math.sin(t), g0.head_z));
+    }
+    const ring = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineDashedMaterial({ color: 0xf06a6a, dashSize: 30, gapSize: 20,
+        transparent: true, opacity: 0.6 }));
+    ring.computeLineDistances();
+    world.add(ring);
+    const head = label("no sponge above here", "dim");
+    head.position.set(mid.x, mid.y - 420, g0.head_z);
+    world.add(head);
+  }
+
+  // the camera, and what it sees
+  {
+    const c = g0.camera, dir = new THREE.Vector3(c.dx, c.dy, c.dz).normalize();
+    const rig = new THREE.Group();
+    rig.position.set(c.x, c.y, c.z);
+    rig.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
+    rig.add(new THREE.Mesh(new THREE.BoxGeometry(26, 90, 25),
+      new THREE.MeshStandardMaterial({ color: 0x6ea8fe, roughness: 0.5 })));
+    const L = 380, hw = L * Math.tan(43.5 * DEG), hh = L * Math.tan(29 * DEG);
+    const P = [[L, hw, hh], [L, -hw, hh], [L, -hw, -hh], [L, hw, -hh]].map((q) => new THREE.Vector3(...q));
+    const seg = [];
+    for (let k = 0; k < 4; k++) seg.push(new THREE.Vector3(), P[k], P[k], P[(k + 1) % 4]);
+    rig.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(seg),
+      new THREE.LineBasicMaterial({ color: 0x6ea8fe, transparent: true, opacity: 0.45 })));
+    world.add(rig);
+    const tag = label("camera");
+    tag.element.style.color = "#6ea8fe";
+    tag.position.set(c.x, c.y, c.z + 70);
+    world.add(tag);
+  }
+
+  // ---- the arms ----
+  const linkGeo = {};
+  for (const [k, L] of Object.entries(mesh.links)) linkGeo[k] = geometry(L.V, L.F);
+  const reachGeo = new THREE.SphereGeometry(scene.reach_mm, 28, 14).rotateX(Math.PI / 2);
+  const discGeo = new THREE.CylinderGeometry(scene.base_r_mm + 14, scene.base_r_mm + 14, 5, 40)
+    .rotateX(Math.PI / 2).translate(0, 0, 2.5);
+  const ringGeo = new THREE.RingGeometry(scene.base_r_mm + 22, scene.base_r_mm + 32, 48);
+  let objs = [];
+
+  function makeArm(a) {
+    const base = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({ roughness: 0.5, metalness: 0.05,
+      side: THREE.DoubleSide });
+    const links = {}, pick = [];
+    // Everything above the base turns about the base's own axis: a pivot
+    // there shows a start pose being dragged before the check draws it.
+    const pivot = new THREE.Group(), inner = new THREE.Group();
+    pivot.position.set(mesh.yaw_axis_mm || 10, 0, 0);
+    inner.position.set(-(mesh.yaw_axis_mm || 10), 0, 0);
+    pivot.add(inner);
+    base.add(pivot);
+    for (const k of Object.keys(linkGeo)) {
+      const m = new THREE.Mesh(linkGeo[k], mat);
+      m.matrixAutoUpdate = false;
+      m.userData.arm = a;
+      (k === "base_link" ? base : inner).add(m);
+      links[k] = m;
+      pick.push(m);
+    }
+    const startArrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0, (mesh.shoulder_mm || 123) + 60), 200, 0xffffff, 40, 22);
+    pivot.add(startArrow);
+    const disc = new THREE.Mesh(discGeo, mat);
+    disc.userData.arm = a;
+    base.add(disc);
+    pick.push(disc);
+    const arrow = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 6),
+      scene.base_r_mm + 150, 0xffffff, 45, 26);
+    base.add(arrow);
+    const ring = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffffff,
+      side: THREE.DoubleSide }));
+    ring.position.z = 3;
+    base.add(ring);
+    const reach = new THREE.Mesh(reachGeo, new THREE.MeshBasicMaterial({ wireframe: true,
+      transparent: true, opacity: 0.07, depthWrite: false }));
+    reach.position.z = mesh.shoulder_mm || 123;
+    reach.raycast = () => {};
+    base.add(reach);
+    const tag = label("");
+    world.add(base, tag);
+    return { base, mat, links, pick, arrow, ring, reach, tag, pivot, startArrow, shown: 0 };
+  }
+
+  function dropArms() {
+    if (tc.object) tc.detach();
+    for (const o of objs) {
+      world.remove(o.base, o.tag);
+      o.tag.element.remove();
+      o.mat.dispose();
+      o.ring.material.dispose();
+      o.reach.material.dispose();
+      if (o.arrow.dispose) o.arrow.dispose();
+      if (o.startArrow.dispose) o.startArrow.dispose();
+    }
+    objs = [];
+  }
+
+  function place(o, r) {
+    o.base.position.set(r.x_from_seat_mm, r.y_from_seat_mm, r.z_mm);
+    o.base.rotation.set((r.roll_deg || 0) * DEG, (r.tilt_deg || 0) * DEG, r.facing_deg * DEG, "ZYX");
+    o.tag.position.set(r.x_from_seat_mm, r.y_from_seat_mm, r.z_mm + 360);
+  }
+
+  // Each link where the last check put it (the arm waiting), in the arm's
+  // own frame; folded until a check comes back.
+  function pose(o, a) {
+    const info = check && check.arms && check.arms.length === arms.length ? check.arms[a] : null;
+    const tf = (info && info.links) || mesh.home_links;
+    for (const [k, m] of Object.entries(o.links)) {
+      if (tf[k]) m.matrix.set(...tf[k]);
+      m.matrixWorldNeedsUpdate = true;
+    }
+    // The links are drawn turned as the check found the arm waits (shown).
+    // A start pose changed since that check turns them on the pivot until
+    // the next check comes back; the white arrow always shows the one asked.
+    const want = arms[a].start_deg || 0;
+    o.shown = info && info.start_deg != null ? info.start_deg : 0;
+    const asked = check && check.asked ? check.asked[a] : null;
+    const delta = (!info || asked === want) ? 0 : want - o.shown;
+    if (!(tc.dragging && tc.object === o.pivot)) o.pivot.rotation.set(0, 0, delta * DEG);
+    const d = (want - delta) * DEG;
+    o.startArrow.setDirection(new THREE.Vector3(Math.cos(d), Math.sin(d), 0));
+    o.base.updateMatrixWorld(true);
+  }
+
+  // ---- looking around ----
+  const cam = new THREE.PerspectiveCamera(42, 1, 10, 40000);
+  cam.up.set(0, 0, 1);
+  const orbit = new OrbitControls(cam, renderer.domElement);
+  orbit.zoomSpeed = 1.2;
+  orbit.maxPolarAngle = 0.53 * Math.PI;
+  const tc = new TransformControls(cam, renderer.domElement);
+  tc.setSize(0.95);
+  world.add(tc);
+
+  // Drawn only when something changed.
+  let queued = false;
+  function draw() {
+    queued = false;
+    renderer.render(world, cam);
+    labels.render(world, cam);
+  }
+  const need = () => {
+    if (!queued) {
+      queued = true;
+      requestAnimationFrame(draw);
+    }
+  };
+  orbit.addEventListener("change", need);
+  tc.addEventListener("change", need);
+
+  function look(pos) {
+    cam.position.copy(pos);
+    orbit.target.copy(mid);
+    orbit.update();
+    need();
+  }
+  const views = {
+    home: () => look(new THREE.Vector3(mid.x + 2300, mid.y - 1900, mid.z + 1350)),
+    cam: () => {
+      const c = g0.camera, d = new THREE.Vector3(c.dx, c.dy, c.dz).normalize();
+      look(new THREE.Vector3(c.x, c.y, c.z).addScaledVector(d, -700));
+    },
+    top: () => look(new THREE.Vector3(mid.x - 1, mid.y, mid.z + 4200)),
+    side: () => look(new THREE.Vector3(mid.x, mid.y - 4000, mid.z + 1)),
+  };
+  views.home();
+  document.getElementById("v-cam").addEventListener("click", views.cam);
+  document.getElementById("v-top").addEventListener("click", views.top);
+  document.getElementById("v-side").addEventListener("click", views.side);
+
+  function resize() {
+    const w = box.clientWidth, h = box.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h);
+    labels.setSize(w, h);
+    cam.aspect = w / h;
+    cam.updateProjectionMatrix();
+    need();
+  }
+  new ResizeObserver(resize).observe(box);
+  resize();
+
+  // ---- moving an arm ----
+  let held = true, dragFrom = null, mode = "move";
+  function setMode(m) {
+    mode = m;
+    if (m === "start") {
+      tc.setMode("rotate");
+      tc.setSpace("local");
+      tc.showX = false; tc.showY = false; tc.showZ = true;
+    } else if (m === "move") {
+      tc.setMode("translate");
+      tc.setSpace("world");
+      tc.showX = true; tc.showY = true; tc.showZ = true;
+    } else if (m === "turn") {
+      tc.setMode("rotate");
+      tc.setSpace("world");
+      tc.showX = false; tc.showY = false; tc.showZ = true;
+    } else {
+      tc.setMode("rotate");
+      tc.setSpace("local");
+      tc.showX = true; tc.showY = true; tc.showZ = true;
+    }
+    for (const k of ["move", "turn", "tilt", "start"])
+      document.getElementById("m-" + k).classList.toggle("on", k === m);
+    held = true;
+    refresh();
+  }
+  for (const k of ["move", "turn", "tilt", "start"])
+    document.getElementById("m-" + k).addEventListener("click", () => setMode(k));
+  function snaps(big) {
+    tc.setTranslationSnap(big ? 50 : 5);
+    tc.setRotationSnap((big ? 15 : 1) * DEG);
+  }
+  snaps(false);
+  window.addEventListener("keydown", (e) => { if (e.key === "Shift") snaps(true); });
+  window.addEventListener("keyup", (e) => { if (e.key === "Shift") snaps(false); });
+  window.addEventListener("blur", () => snaps(false));
+
+  tc.addEventListener("dragging-changed", (e) => {
+    orbit.enabled = !e.value;
+    const r = arms[sel];
+    if (e.value) {
+      if (document.activeElement && document.activeElement.tagName === "INPUT")
+        document.activeElement.blur();
+      dragFrom = JSON.stringify(r);
+    } else if (r && dragFrom !== JSON.stringify(r)) {
+      changed(true);
+    }
+  });
+
+  const eul = new THREE.Euler();
+  tc.addEventListener("objectChange", () => {
+    const o = objs[sel], r = arms[sel];
+    if (o && r && tc.object === o.pivot) {
+      eul.setFromQuaternion(o.pivot.quaternion, "ZYX");
+      const L = scene.limits;
+      r.start_deg = round1(clamp(o.shown + eul.z / DEG, -L.start, L.start));
+      o.pivot.rotation.set(0, 0, (r.start_deg - o.shown) * DEG);
+      const d = o.shown * DEG;
+      o.startArrow.setDirection(new THREE.Vector3(Math.cos(d), Math.sin(d), 0));
+      changed(false);
+      drawArms();
+      return;
+    }
+    if (!o || !r || tc.object !== o.base) return;
+    const L = scene.limits, p = o.base.position;
+    r.x_from_seat_mm = round1(clamp(p.x, -L.xy, L.xy));
+    r.y_from_seat_mm = round1(clamp(p.y, -L.xy, L.xy));
+    r.z_mm = round1(clamp(p.z, L.z_min, L.z_max));
+    eul.setFromQuaternion(o.base.quaternion, "ZYX");
+    r.facing_deg = round1(wrap(eul.z / DEG)) || 0;
+    r.tilt_deg = round1(wrap(eul.y / DEG)) || 0;
+    r.roll_deg = round1(wrap(eul.x / DEG)) || 0;
+    changed(false);
+    drawArms();
+  });
+
+  // ---- picking an arm ----
+  const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+  function armAt(e) {
+    const b = renderer.domElement.getBoundingClientRect();
+    ndc.set(((e.clientX - b.left) / b.width) * 2 - 1, -((e.clientY - b.top) / b.height) * 2 + 1);
+    ray.setFromCamera(ndc, cam);
+    const hit = ray.intersectObjects(objs.flatMap((o) => o.pick), false)[0];
+    return hit ? hit.object.userData.arm : null;
+  }
+  let down = null;
+  renderer.domElement.addEventListener("pointerdown", (e) => {
+    down = { x: e.clientX, y: e.clientY, gizmo: tc.axis !== null || tc.dragging };
+  });
+  renderer.domElement.addEventListener("pointerup", (e) => {
+    const d = down;
+    down = null;
+    if (!d || e.button !== 0 || d.gizmo || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4) return;
+    const a = armAt(e);
+    if (a == null || a >= arms.length) return;
+    held = true;
+    if (a !== sel) select(a); else refresh();
+  });
+  let hoverAt = null;
+  renderer.domElement.addEventListener("pointermove", (e) => {
+    if (e.buttons || tc.dragging) return;
+    if (!hoverAt) requestAnimationFrame(() => {
+      const a = tc.axis ? null : armAt(hoverAt);
+      renderer.domElement.style.cursor = tc.axis ? "grab" : (a != null ? "pointer" : "");
+      hoverAt = null;
+    });
+    hoverAt = e;
+  });
+
+  // ---- keeping up with the page ----
+  let painted;
+  function refresh() {
+    if (objs.length !== arms.length) {
+      dropArms();
+      objs = arms.map((_r, a) => makeArm(a));
+    }
+    arms.forEach((r, a) => {
+      const o = objs[a], on = a === sel;
+      place(o, r);
+      pose(o, a);
+      o.mat.color.set(COLORS[a % 4]);
+      o.mat.emissive.set(on ? 0x2a2a2a : 0x000000);
+      o.arrow.setColor(COLORS[a % 4]);
+      o.ring.visible = on;
+      o.reach.visible = on;
+      o.reach.material.color.set(COLORS[a % 4]);
+      const info = (check && check.arms && check.arms[a]) || {};
+      o.tag.element.textContent = `${a + 1} · ${name(a)}` + (info.still ? " (stays still)" : "");
+      o.tag.element.style.color = COLORS[a % 4];
+      o.tag.element.style.outline = on ? "1px solid #ffffff" : "none";
+    });
+    const o = objs[sel];
+    if (held && o) {
+      const target = mode === "start" ? o.pivot : o.base;
+      if (tc.object !== target) tc.attach(target);
+    } else if (tc.object) {
+      tc.detach();
+    }
+    if (painted !== check) {
+      painted = check;
+      paint();
+    }
+    need();
+  }
+
+  Object.assign(V3, {
+    refresh,
+    mode: setMode,
+    letGo: () => { held = false; refresh(); },
+    views,
+    parts: { cam, orbit, tc, world, arms: () => objs },     // for poking at from the console
+    ready: true,
+  });
+  refresh();
+  vmsg.hidden = true;
+}
+</script>
+</body>
+</html>

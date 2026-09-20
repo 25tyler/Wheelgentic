@@ -1,0 +1,36 @@
+{
+  "name": "searched on both recordings: all three at table height",
+  "frame": "x and y from the seat point, z above the floor",
+  "saved": "2026-09-19T14:05:21",
+  "arms": [
+    {
+      "id": "a0",
+      "x_from_seat_mm": 520.0,
+      "y_from_seat_mm": 35.0,
+      "z_mm": 720.0,
+      "facing_deg": -180.0,
+      "tilt_deg": 0.0
+    },
+    {
+      "id": "a1",
+      "x_from_seat_mm": 340.0,
+      "y_from_seat_mm": 445.0,
+      "z_mm": 720.0,
+      "facing_deg": -101.1
+    },
+    {
+      "id": "a2",
+      "x_from_seat_mm": 400.0,
+      "y_from_seat_mm": -440.0,
+      "z_mm": 640.0,
+      "facing_deg": 104.0
+    }
+  ],
+  "phases": [
+    [
+      0,
+      1,
+      2
+    ]
+  ]
+}

@@ -1,0 +1,53 @@
+# scrub3d dependencies. SEPARATE from the project's requirements.txt, which is
+# left untouched. Install into the same venv; nothing here conflicts with the
+# existing pins (verify numpy: the project pins numpy==2.1.3 and Open3D has
+# historically been fussy about numpy major versions -- this is Phase 0's gate).
+#
+# All MIT / Apache-2.0 / BSD, per the project's CC0-or-MIT-only rule.
+# All verified to ship cp312 win_amd64 wheels.
+
+pyrealsense2==2.58.4.10922   # Apache-2.0. D455 driver. THE dependency that was
+                             # impossible on Apple Silicon and is a pip install
+                             # on Windows -- the whole reason this is viable.
+open3d==0.19.0               # MIT. TSDF/mesh/ICP/raycasting.
+rerun-sdk==0.37.2            # MIT+Apache-2.0. Operator 3D view. cp310-abi3
+                             # wheel, so it covers 3.12.
+scipy==1.18.1                # BSD-3. Rotations, optimisation.
+trimesh==5.1.0               # MIT. Mesh utilities, ray queries.
+embreex                      # Apache-2.0. ~100x trimesh's pure-python ray
+                             # engine. Optional but the r(s,theta) bake is
+                             # slow without it.
+
+numpy                        # BSD-3. Everything.
+opencv-python                # Apache-2.0. Image rotation, resize, colour
+                             # conversion, connected components.
+matplotlib                   # PSF/BSD-compatible. The --preview still only.
+                             # The real operator view is Rerun.
+mediapipe==0.10.14           # Apache-2.0. Joints THROUGH CLOTHING, which is
+                             # the one thing Sapiens cannot do on a dressed
+                             # subject and the reason live tracking works.
+                             # CPU, 40fps on the lite model.
+torch                        # BSD-3. Runs the Sapiens TorchScript checkpoints.
+                             # Install the CUDA build, not the default:
+                             #   pip install --force-reinstall torch \
+                             #     --index-url https://download.pytorch.org/whl/cu128
+                             # The CPU build is what ships by default and it
+                             # makes segmentation minutes instead of seconds.
+
+# The developer console (devconsole/app.py) only. The pipeline never imports
+# these, so a machine that only runs the pipeline can leave them out.
+dash==4.4.1                  # MIT. The console's pages, served locally.
+plotly==7.0.0                # MIT. Its charts. Comes with dash; pinned here
+                             # because the console uses it directly.
+psutil==7.2.2                # BSD-3. Processes, ports, and stopping a job's
+                             # whole process tree.
+
+# THE WEIGHTS ARE NOT A PIP DEPENDENCY. Sapiens v1 is CC-BY-NC-4.0 on code AND
+# weights, so scrub3d/fetch_models.py shows the terms and each user downloads
+# their own. torch above is BSD; the licence that matters is on the
+# checkpoints, not the framework.
+
+# NOT required, deliberately:
+#   python-fcl  -- capsule-capsule is 25 lines of numpy (scrub3d/collide.py)
+#                  and builds cleanly on Windows, unlike FCL.
+#   ROS / MoveIt -- we use the published FK constants, not the stack.

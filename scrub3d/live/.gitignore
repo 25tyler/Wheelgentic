@@ -1,0 +1,7 @@
+# The rig editor keeps the placement it replaced beside the new one.
+*.previous.json
+*.json.tmp
+# Which COM port and board each real arm is on: this laptop's own.
+arm_ports.json
+# What the real arms did in a --drive run: places on a person's body.
+drive_logs/
