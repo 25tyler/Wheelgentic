@@ -591,12 +591,23 @@ export function makeRobotArm(scene, ramp, region) {
       // null or unusable carries nothing this file can pose from, so it is
       // refused whole rather than adopted as a partial pose -- half a pose
       // and half an inference is the drift the fallback exists to avoid.
+      // ALL SIX NOW, NOT THREE. This took only the first three because the
+      // drawn arm had no wrist to spend the others on -- the mesh at
+      // GEOM.fore was decoration that never turned. The OpenYAM's wrist
+      // moves the tool 163mm at 0.8 rad (armmesh_openyam's own self-test
+      // measures it), so throwing 4, 5 and 6 away drew a real arm in a pose
+      // it was not in, with the error concentrated exactly where the tool
+      // meets the person.
+      //
+      // The first three still decide whether a payload is usable: an arm
+      // with no base, shoulder or elbow has no pose at all, while a missing
+      // wrist angle just leaves that joint where it was.
       const next = [];
-      for (let i = 0; i < 3; i++) {
+      for (let i = 0; i < 6; i++) {
         const v = Number(q[i]);
         next.push(Number.isFinite(v) ? v : null);
       }
-      if (next.every((v) => v === null)) {
+      if (next.slice(0, 3).every((v) => v === null)) {
         jointsQ = null; jointsSrc = null; return false;
       }
       jointsQ = next;
@@ -644,6 +655,22 @@ export function makeRobotArm(scene, ramp, region) {
         if (jointsQ[0] !== null) yawTarget = jointsQ[0];
         if (jointsQ[1] !== null) target = { ...target, sh: jointsQ[1] };
         if (jointsQ[2] !== null) target = { ...target, el: jointsQ[2] };
+        // THE WRIST, JOINTS 4 TO 6. Straight onto the group rather than
+        // through the spring: the springs above exist so a cartoon arm
+        // TRAVELS to a commanded pose instead of snapping, and a measured
+        // wrist is not a destination -- it is where the metal already is,
+        // arriving at 15Hz. Smoothing it would draw the wrist trailing the
+        // arm it is bolted to.
+        //
+        // Axes from the URDF, read with armmesh_openyam._model():
+        //   q[3] joint4  +y   the forearm roll
+        //   q[4] joint5  +x   the wrist pitch, the one that moves the tool
+        //   q[5] joint6  -z   the claw turn about its own axis
+        // The page's fore link runs along +y, so these map to the same
+        // three axes in the wrist's own frame.
+        if (jointsQ[3] !== null) wrist.rotation.y = jointsQ[3];
+        if (jointsQ[4] !== null) wrist.rotation.x = jointsQ[4];
+        if (jointsQ[5] !== null) wrist.rotation.z = -jointsQ[5];
       } else if (reachPt) {
         // Into the arm root's own frame. worldToLocal mutates, so this goes
         // through the scratch vector rather than the stored point -- copying

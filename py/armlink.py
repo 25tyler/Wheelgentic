@@ -50,6 +50,13 @@ import time
 ENV = "SCRUB3D_DIMOS"
 DEFAULT_PORT = 7790
 
+# Where dimOS puts each arm's base in its own plate frame, metres. The same
+# numbers as arm_dimos.py's SIDE_OFFSET_M, and they must stay the same: this
+# is dimOS's dual_openyam plate, 620mm between the two bases, and it is a
+# property of the URDF rather than of our rig. Our plank can be any width;
+# subtracting this is what makes that true.
+PLATE_OFFSET_M = {"left": (0.0, 0.31, 0.0), "right": (0.0, -0.31, 0.0)}
+
 # How often to ask. The arms report at 30Hz inside dimOS; the websocket
 # sends at 15. Asking at 10 is under both and leaves the bridge alone --
 # it is somebody else's process and we are a guest in it.
@@ -106,16 +113,42 @@ class ArmLink:
         return [float(v) for v in j]
 
     def tool_mm(self, side):
-        """Where the tool is, in MILLIMETRES, or None. The bridge sends
-        metres; scrub3d is millimetres everywhere, so it converts here
-        rather than leaving two unit conventions in the same process."""
+        """Where the tool is IN THIS ARM'S OWN BASE FRAME, millimetres.
+
+        TWO CORRECTIONS, AND THE FIRST ONE IS NOT COSMETIC.
+
+        dimOS reports the tool in its PLATE frame, where the two arms sit at
+        their nominal offsets either side of the plate's centre -- +310mm for
+        the left, -310mm for the right. Returning that raw put every tool
+        position 310mm off, and in opposite directions for the two arms, so
+        the error would have looked like a rig problem rather than a units
+        one. arm_dimos.py::_take_state subtracts the same offset for the same
+        reason, and its comment says why it matters: "through the arm's own
+        base, a plank of any width and facing stays right." The plate spacing
+        is dimOS's, not this rig's; the real bases are wherever the rig file
+        puts them.
+
+        Then metres to millimetres, because scrub3d is millimetres
+        everywhere and two unit conventions in one process is how a number
+        ends up a thousand times wrong.
+
+        The JOINT ANGLES need neither correction: they are the arm's own
+        joints in its own frame, which is why armmesh_openyam.link_transforms
+        feeds them straight into the URDF chain and arm_dimos uses q[0] as a
+        yaw directly.
+        """
         with self._lock:
             s, at = self._state, self._at
         if s is None or (time.time() - at) > STALE_S:
             return None
         arm = (s.get("arms") or {}).get(side)
         p = (arm or {}).get("p")
-        return [float(v) * 1000.0 for v in p] if p else None
+        if not p:
+            return None
+        off = PLATE_OFFSET_M.get(side)
+        if off is None:
+            return None
+        return [(float(v) - off[i]) * 1000.0 for i, v in enumerate(p)]
 
     def alive(self):
         with self._lock:
