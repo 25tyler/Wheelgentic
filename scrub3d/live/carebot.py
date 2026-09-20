@@ -60,6 +60,7 @@ REPO = os.path.dirname(S3D)
 LOGS = os.path.join(HERE, "drive_logs")
 STOP_FILE = os.path.join(LOGS, "scrub.stop")
 WATCH_STOP = os.path.join(LOGS, "watch.stop")
+LIMBS_FILE = os.path.join(LOGS, "limbs.json")          # ... and _share_limbs, every posed frame
 DIMS_FILE = os.path.join(LOGS, "dims.json")            # live_body.py's _share_dims writes it
 KEYS_FILE = os.path.join(LOGS, "drink.keys")          # drink.py's Keys._tail reads it
 SETTINGS = os.path.join(HERE, "run_openyam.ps1")      # the scrub's numbers, kept in one place
@@ -194,6 +195,7 @@ class Bot:
             env.update(scrub_settings())
             env["SCRUB3D_STOP_FILE"] = STOP_FILE
             env["SCRUB3D_DIMS"] = DIMS_FILE
+            env["SCRUB3D_LIMBS"] = LIMBS_FILE
             cmd = py + [os.path.join(HERE, "live_body.py"), "--rig", RIG,
                         "--viewer-port", str(RERUN_PORT)]
             if a.dry:
@@ -269,9 +271,10 @@ class Feed:
     six joints each, read from the bridge, so the drawn arms move as the real
     ones do (`joints`, src "measured"), and the sitter's thirteen measured
     dimensions from the running scrub, so the cartoon is their size (`body`).
-    The cartoon's own pose stays with the browser's camera: the scrub shares
-    its joints twice a second, which would make the mirror jerk. --measured-pose
-    sends them anyway.
+    And the cartoon's POSE (`limbs`): the six arm joints the depth camera places,
+    every posed frame, in the world frame web/main.js already expects, so the
+    cartoon and the 3D render are the same person from the same camera.
+    --webcam-pose leaves the pose to the browser's own camera instead.
 
     Read only, like py/armbridge.py: it asks the bridge for state and nothing
     else. An "estop" from the page is a stop."""
@@ -313,8 +316,22 @@ class Feed:
                     d = json.load(f)
                 if d.get("body"):
                     m["body"] = d["body"]
-                if d.get("limbs") and self.bot.a.measured_pose:
-                    m["limbs"] = d["limbs"]
+        except (OSError, ValueError):
+            pass
+        # The cartoon's POSE, from the depth camera. Said every time, present or
+        # null: the page has no timeout of its own, and a sender that goes quiet
+        # leaves the cartoon frozen in its last pose for good. With all six
+        # joints fresh the page poses from them; otherwise it goes back to the
+        # browser's camera.
+        m["limbs"] = None
+        six = [f"{s_}_{j}" for s_ in ("l", "r") for j in ("shoulder", "elbow", "wrist")]
+        try:
+            if not self.bot.a.webcam_pose and time.time() - os.stat(LIMBS_FILE).st_mtime < 2.5:   # not 1: a slow frame must not flip the pose's source
+                with open(LIMBS_FILE, encoding="utf-8") as f:
+                    mm = json.load(f).get("mm") or {}
+                if all(k in mm for k in six):
+                    m["limbs"] = {"src": "depth_measured", "mm": mm, "measured_names": six,
+                                  "measured": 6, "total": 6}
         except (OSError, ValueError):
             pass
         return m
@@ -463,7 +480,7 @@ def make_handler(bot, key=None):
 
 def self_test():
     a = argparse.Namespace(dry=True, upside_down=False, endpoint=None, recording=RECORDING,
-                           measured_pose=False, no_watch=True)
+                           webcam_pose=False, no_watch=True)
     bot = Bot(a)
     s = scrub_settings()
     assert s.get("SCRUB3D_ARM") == "openyam" and "SCRUB3D_SPONGE_R_MM" in s, s
@@ -496,10 +513,20 @@ def self_test():
                    "limbs": {"mm": {}}}, f)
     m = feed.message()
     assert m["phase"] == "IDLE" and m["joints"]["src"] == "measured" and "body" in m, m
-    assert "limbs" not in m
+    assert m["limbs"] is None                          # nobody posed: said, not left out
+    six = {f"{s_}_{j}": [1.0, 2.0, 3.0] for s_ in "lr" for j in ("shoulder", "elbow", "wrist")}
+    with open(LIMBS_FILE, "w", encoding="utf-8") as f:
+        json.dump({"mm": six}, f)
+    m = feed.message()
+    assert m["limbs"]["src"] == "depth_measured" and len(m["limbs"]["mm"]) == 6, m
+    del six["r_wrist"]
+    with open(LIMBS_FILE, "w", encoding="utf-8") as f:
+        json.dump({"mm": six}, f)
+    assert feed.message()["limbs"] is None             # five joints is not a pose
     os.remove(DIMS_FILE)
-    print("  the cartoon's feed: phase, the real arms' joints and the measured body; the pose "
-          "stays with the browser")
+    os.remove(LIMBS_FILE)
+    print("  the cartoon's feed: phase, the real arms' joints, the measured body, and the pose "
+          "from the depth camera (null when it is not whole or not fresh)")
     print("  carebot: OK")
     return 0
 
@@ -518,9 +545,9 @@ def main():
     ap.add_argument("--rerun-port", type=int, default=RERUN_PORT)
     ap.add_argument("--rerun-web-port", type=int, default=RERUN_WEB_PORT)
     ap.add_argument("--page-port", type=int, default=PAGE_PORT)
-    ap.add_argument("--measured-pose", action="store_true",
-                    help="also send the cartoon the sitter's arm joints as the depth camera "
-                         "places them (2 a second: jerky next to the browser's own camera)")
+    ap.add_argument("--webcam-pose", action="store_true",
+                    help="leave the cartoon's pose to the browser's own camera instead of "
+                         "driving it from the depth camera's joints")
     ap.add_argument("--no-watch", action="store_true",
                     help="no live 3D render between tasks (it uses the camera)")
     ap.add_argument("--no-views", action="store_true", help="do not serve the cartoon or Rerun")

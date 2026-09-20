@@ -4779,6 +4779,14 @@ let _taskLast = '';           // the last string written, so an unchanged state
                               // does not touch the DOM 15 times a second
 
 function paintTaskView() {
+  // IN A CARE VIEW THE SCAN'S DOT CLOUD STAYS OFF. It is baked from one scan
+  // (tools/export_body.py), and in her UI the cartoon is posed live from the
+  // depth camera, so the dots no longer sit on the body they were measured
+  // on: from the chair they read as blue spots glitching over the character.
+  // The projector page keeps them. Here rather than at each show(), because
+  // the cloud loads late and several paths turn it on.
+  if (territories) territories.hide();
+
   if (!taskView) return;
   const rows = viewState(taskView.key);
   // Serialise first and compare, for the same reason the joints handler only

@@ -1918,6 +1918,37 @@ def diag(live, depth, live_mesh, n, folder):
 SHARE_PATH = os.environ.get("SCRUB3D_DIMS", "/tmp/wheelgentic-dims.json")
 
 
+LIMBS_PATH = os.environ.get("SCRUB3D_LIMBS", "")
+
+
+def _share_limbs(joints):
+    """EVERY posed frame, the six arm joints as posed, world mm, for the cartoon
+    on the website (carebot.py relays them; web/main.js poses from them and
+    smooths at its own 60 a second, so the camera's 5 to 9 are enough). Only
+    when SCRUB3D_LIMBS names a file. Atomic, and never raises: see _share_dims.
+
+    A joint further from its parent than an arm can be is left out, and with
+    it the claim that the pose was measured: the page then keeps its own."""
+    if not LIMBS_PATH:
+        return
+    try:
+        got = {}
+        for s_ in ("l", "r"):
+            was = None
+            for j in ("shoulder", "elbow", "wrist"):
+                p = joints.get(f"{s_}_{j}")
+                if p is None or (was is not None and float(np.linalg.norm(p - was)) > 500.0):
+                    break
+                got[f"{s_}_{j}"] = [round(float(v), 1) for v in p]
+                was = p
+        tmp = LIMBS_PATH + ".part"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump({"t": time.time(), "mm": got}, fh)
+        os.replace(tmp, LIMBS_PATH)
+    except Exception:                                        # noqa: BLE001
+        pass
+
+
 def _share_dims(D, seat, sitting_height, joints=None):
     """Write the measured dimensions where another process can read them.
 
@@ -2347,6 +2378,7 @@ def main():
                     arms.log()
             if "posed" not in ev:
                 continue
+            _share_limbs(body.joints)
             # Only the viewer and --diag ever read it: building it for a run
             # that has neither is work nobody looks at.
             live_mesh = (surface(depth, color, live.mask, intr, live.T_wc)
