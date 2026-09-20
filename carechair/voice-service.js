@@ -10,6 +10,7 @@ export function createVoiceService(providers, robot) {
   }
   function responseFor(command, delivery) {
     if (delivery.status === 'cancelled') return 'Your request was cancelled.';
+    if (delivery.status === 'refused') return "I'm still busy with the last thing you asked for. Say stop if you want me to end it first.";
     if (command.action === 'none') return command.response;
     if (['stop', 'pause'].includes(command.action)) return delivery.mode === 'demo'
       ? `Your ${command.action} request is ready.` : `I've sent your ${command.action} request.`;

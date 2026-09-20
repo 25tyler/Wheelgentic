@@ -65,6 +65,7 @@ import rigconfig                                # noqa: E402
 import viz as VIZ                               # noqa: E402
 from arms_live import Arms, LOST_S              # noqa: E402
 
+STOP_FILE = os.environ.get("SCRUB3D_STOP_FILE", "")
 MAX_LEAN_DEG = 25.0   # a seated torso stays this close to upright
 LM = {"nose": 0, "l_eye": 2, "r_eye": 5, "l_ear": 7, "r_ear": 8,
       "l_shoulder": 11, "r_shoulder": 12, "l_elbow": 13, "r_elbow": 14,
@@ -2207,6 +2208,12 @@ def main():
                     time.sleep(ahead)
             now = time.time()
             if now - t0 > a.seconds:
+                break
+            # carebot.py ends a scrub by writing this file (SCRUB3D_STOP_FILE):
+            # the loop ends here and the shutdown below draws the arms back, as
+            # Ctrl+C does. A signal cannot do that on Windows.
+            if STOP_FILE and os.path.exists(STOP_FILE):
+                print("  asked to stop: drawing the arms back", flush=True)
                 break
             if dump is not None and live.T_wc is not None:
                 # A countdown on screen first, so the person is ready.

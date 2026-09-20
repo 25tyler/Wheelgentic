@@ -15,6 +15,7 @@ const assets = new Map([
   ['/voice-client.js', ['voice-client.js', 'text/javascript']],
   ['/voice-speech.js', ['voice-speech.js', 'text/javascript']],
   ['/vitals-client.js', ['vitals-client.js', 'text/javascript']],
+  ['/robot-client.js', ['robot-client.js', 'text/javascript']],
 ]);
 const audioTypes = new Set(['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/wav', 'audio/x-wav']);
 async function readBody(req, maxBytes) {
@@ -74,6 +75,9 @@ export function createApp(config = getConfig(), dependencies = {}) {
         return json(res, 200, { delivery: await voice.task(body?.command) });
       }
       if (req.method === 'GET' && url.pathname === '/api/vitals') return json(res, 200, hardware.snapshot());
+      // What the arms are doing, from the robot backend (scrub3d/live/carebot.py). The page
+      // cannot ask it directly: another origin. Never an error: no backend is a state too.
+      if (req.method === 'GET' && url.pathname === '/api/robot/status') return json(res, 200, await robot.status());
       if (req.method === 'GET' && url.pathname === '/api/hardware/events') {
         if (streams.size >= 8) throw new AppError('Too many open sensor views.', 429);
         res.writeHead(200, { 'Content-Type':'text/event-stream', 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff' });

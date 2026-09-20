@@ -1,5 +1,6 @@
 import { mountVoice, disposeVoice } from './voice-client.js';
 import { mountVitals } from './vitals-client.js';
+import { mountRobot } from './robot-client.js';
 let voiceController;
 const $=s=>document.querySelector(s);
 const day=()=>new Date().toLocaleDateString('en-CA');
@@ -37,6 +38,7 @@ $('#close-modal').onclick=close;
 document.addEventListener('click',e=>{if(e.target.id==='download-report'){const url=URL.createObjectURL(new Blob([report()],{type:'text/plain'}));const a=document.createElement('a');a.href=url;a.download=`carechair-care-${day()}.txt`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Report downloaded.');}if(e.target.id==='email-report'){const input=$('#caretaker-email');if(!input.value||!input.checkValidity()){input.reportValidity();input.focus();toast('Enter a valid recipient email.');return;}location.href=`mailto:${encodeURIComponent(input.value)}?subject=${encodeURIComponent('carechair daily care update')}&body=${encodeURIComponent(report())}`;toast('Email draft requested. Send it from your email app.');}});
 render();
 voiceController=mountVoice($('#voice-panel'));
+mountRobot($('#robot-panel'));
 const vitalsController=mountVitals($('#vitals-panel'),()=>{
   if($('#modal').open){toast('Close the care form to use the microphone.');return;}
   if(view!=='overview')navigate('overview');

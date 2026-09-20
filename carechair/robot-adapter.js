@@ -20,8 +20,16 @@ export function createRobotAdapter(config, fetchFn = fetch) {
       const headers = { 'Content-Type': 'application/json', 'Idempotency-Key': payload.command_id };
       if (config.robotKey) headers.Authorization = `Bearer ${config.robotKey}`;
       // No automatic retries: a lost response must not duplicate a physical task.
-      await requestJson(fetchFn, robotUrl(endpoint), { method: 'POST', headers, body: JSON.stringify(payload) }, 'Robot backend', config.timeoutMs);
+      const reply = await requestJson(fetchFn, robotUrl(endpoint), { method: 'POST', headers, body: JSON.stringify(payload) }, 'Robot backend', config.timeoutMs);
+      // The backend does one thing at a time, and says so rather than failing.
+      if (reply?.status === 'refused') return { status: 'refused', mode: 'live', endpoint, payload, reason: String(reply.reason || '').slice(0, 120) };
       return { status: 'accepted', mode: 'live', endpoint, payload };
+    },
+    async status() {
+      if (config.robotMode === 'demo') return { state: 'demo', mode: 'demo', said: [], views: null };
+      try {
+        return { mode: 'live', ...(await requestJson(fetchFn, robotUrl('/api/status'), { headers: config.robotKey ? { Authorization: `Bearer ${config.robotKey}` } : {} }, 'Robot backend', 3000)) };
+      } catch { return { state: 'unreachable', mode: 'live', said: [], views: null }; }
     },
     async vitals() {
       if (config.robotMode === 'demo') return { status: 'disconnected', readings: null, mode: 'demo' };

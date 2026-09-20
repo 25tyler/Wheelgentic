@@ -170,7 +170,7 @@ ARC_RAD_S = 0.25            # a turn the planner refuses is streamed, this fast
 
 UP = np.array([0.0, 0.0, 1.0])
 SIDES = ("left", "right")
-POSE_FILE = os.path.join(HERE, "drive_logs", "drink_taught.json")
+POSE_FILE = os.path.join(HERE, "drink_pose.json")    # joints, no person in it: kept in git
 KEYS_FILE = os.path.join(HERE, "drive_logs", "drink.keys")   # see Keys._tail
 
 
