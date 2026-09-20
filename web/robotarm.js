@@ -161,6 +161,25 @@ export async function loadArmGeometry(url = 'assets/armgeom.json') {
     const total = next.shoulder_pivot + next.upper + next.fore;
     if (Math.abs(total - SPONGE_CHAIN) > 0.002) return false;
 
+    // WHICH ARM IS THIS. The chain always sums to 1.42 by construction, so
+    // the length check above passes for EITHER arm and cannot tell them
+    // apart. Measured: a bake run without SCRUB3D_ARM=openyam wrote the
+    // RoArm's 238.7mm upper and 280.2mm fore into this file, the page
+    // adopted it happily, and the arms on screen were a different robot
+    // from the one bolted to the chair -- with nothing anywhere saying so.
+    //
+    // The exporter now stamps `arm`. A file that names the other one is
+    // refused rather than drawn, because the fallback geometry being
+    // slightly wrong is a smaller lie than confidently drawing the wrong
+    // machine. An older file with no `arm` key is still accepted: it
+    // predates the stamp and rejecting it would break a working page.
+    if (doc.arm && doc.arm !== 'openyam') {
+      console.warn(`[arm] armgeom.json describes ${doc.arm}, not the OpenYAM `
+                   + `on the chair -- keeping the built-in proportions. `
+                   + `Re-bake with SCRUB3D_ARM=openyam.`);
+      return false;
+    }
+
     // THE WIDTHS NEED THEIR OWN CHECK, because the length check above passes
     // happily while the arm is drawn as a slab. Measured 2026-09-19: a file
     // whose three lengths summed to 1.42 correctly also carried w_fore =

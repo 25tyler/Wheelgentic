@@ -196,7 +196,17 @@ def geometry():
         eoat_r = AM.eoat_radius()
 
     return {
-        "source": "scrub3d/kinematics.py + scrub3d/armmesh.py (roarm URDF/STL)",
+        # WHICH ARM THIS FILE DESCRIBES. It said "roarm" unconditionally,
+        # including when SCRUB3D_ARM=openyam had just baked OpenYAM numbers
+        # into it -- so a file holding a 458.6mm forearm claimed to come from
+        # the arm whose forearm is 280.2mm. That is how a stale bake went
+        # unnoticed: the lengths were wrong and the only label that could
+        # have said so was wrong in the same direction.
+        "source": ("scrub3d/kinematics_openyam.py + scrub3d/armmesh_openyam.py"
+                   " (OpenYAM URDF/STL)" if getattr(AM, "OPENYAM", False)
+                   else "scrub3d/kinematics.py + scrub3d/armmesh.py"
+                        " (roarm URDF/STL)"),
+        "arm": "openyam" if getattr(AM, "OPENYAM", False) else "roarm",
         "mm_per_unit": round(mm_per_unit, 3),
         # Millimetres, so anybody can check these against the physical arm.
         "mm": {
