@@ -496,6 +496,24 @@ class PoseFeed:
                 # with a joint that is absent -- it holds the region at its
                 # last live pose and reports it lost after a second -- and
                 # that behaviour only works if absent really means absent.
+                # A MEASURED JOINT SURVIVES A LOW VISIBILITY SCORE. The floor
+                # below exists because MediaPipe GUESSES an occluded joint
+                # rather than omitting it, and a guess must read as absent.
+                # But that reasoning is about the GUESS. When depth has put a
+                # real surface at that pixel, the joint is not a guess any
+                # more, and dropping it throws away the better evidence
+                # because the weaker source was unsure.
+                #
+                # AND THAT REASONING WAS WRONG, MEASURED. Letting a measured
+                # joint through the floor put a shoulder at -1739mm: an
+                # occluded joint is one MediaPipe placed by GUESSING, so the
+                # pixel it names is not on the person, and sampling depth
+                # there measures the wall behind them with total confidence.
+                # A measured wrong point is worse than an absent one, because
+                # it arrives labelled "measured".
+                #
+                # The floor stays first. Depth can only confirm a joint the
+                # detector actually saw; it cannot rescue one it invented.
                 if p.visibility < self.min_visibility:
                     continue
                 # A measured joint replaces the estimate outright. Not blended:
@@ -597,6 +615,20 @@ class PoseFeed:
             return None, None, None, 0.0
         if self.mirror:
             frame = cv2.flip(frame, 1)
+            # THE DEPTH HAS TO FLIP WITH IT. Pose runs on the mirrored colour
+            # image, so its pixel x is measured from the mirrored edge, and
+            # a depth frame still in camera order is indexed at 1280-x. On a
+            # seated person that lands on the wall past their shoulder:
+            # measured, a left shoulder came back 1739mm from the right one,
+            # a "shoulder width" no body has, and it arrived labelled
+            # measured because the depth read was perfectly confident about
+            # the wrong pixel.
+            #
+            # Flipped HERE rather than in ReplayCapture, because the mirror
+            # is this class's choice and the capture has no idea it happened.
+            _d = getattr(self.cap, "depth_mm", None)
+            if _d is not None:
+                self.cap.depth_mm = cv2.flip(_d, 1)
         h, w = frame.shape[:2]
 
         # TRAP 2: the GPU delegate REJECTS 3-channel images.

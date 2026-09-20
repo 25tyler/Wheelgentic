@@ -136,7 +136,15 @@ EVENT = {"seq": 0, "mode": "live", "limb": "forearm_L", "t": 0.0,
          "scrub": False, "contact": False, "clean": 0, "reset": False,
          "pops": [], "place": None, "ack": None, "phase": "IDLE",
          "solve": None, "gov": None, "body": None, "scrub_u": None,
-         "joints": None, "limbs": None}
+         "joints": None, "limbs": None,
+         # "body" is HOW BIG THE PERSON ACTUALLY IS -- the measurements
+         # scrub3d/live/live_body.py takes off the depth camera, carried so
+         # the page can rebuild the model at this person's size instead of a
+         # typical adult's. STICKY, unlike "limbs": a body's proportions do
+         # not change when they lean out of frame, and the last measurement
+         # of THIS person stays true until somebody else sits down. See
+         # _sample_body() for why it reports its own confidence.
+         "body": None}
 LOCK = threading.Lock()
 RUNNING = True
 REC_FH = None
@@ -176,6 +184,97 @@ ARM_ID = "a0"
 # zeros: a zero is a claim that a joint is at its origin, and null is the
 # truth, "this driver does not know".
 N_JOINTS = 6
+
+
+# The body being measured, accumulated across frames. live_body.dims() gives
+# thirteen `Measured` accumulators, each a running median blended against a
+# typical-adult prior by sample count -- so this starts as the generic adult
+# and becomes THIS person as evidence arrives, and always reports which.
+#
+# Module-level and built lazily: a projector run with no depth never touches
+# it, and importing live_body costs open3d and mediapipe on a machine that
+# may have neither.
+_BODY_DIMS = None
+_BODY_LB = None
+
+
+def _measure_body(world_mm, measured_names):
+    """Feed one frame's MEASURED joints into the body accumulators.
+
+    `world_mm` is vision.PoseFeed.world_mm and `measured_names` is the subset
+    that came off a depth sensor this frame. ONLY THE MEASURED ONES ARE USED:
+    an estimated joint is MediaPipe's generic-human guess, and feeding that
+    into a measurement of this person would launder the guess into a number
+    the page then calls measured.
+
+    NEVER RAISES. It rides the vision loop.
+    """
+    global _BODY_DIMS, _BODY_LB
+    if not measured_names:
+        return
+    try:
+        if _BODY_DIMS is None:
+            import live_body as _lb                          # noqa: F401
+            _BODY_LB = _lb
+            _BODY_DIMS = _lb.dims()
+
+        def seg(a, b):
+            if a not in measured_names or b not in measured_names:
+                return None
+            pa, pb = world_mm.get(a), world_mm.get(b)
+            if pa is None or pb is None:
+                return None
+            import numpy as _np
+            d = float(_np.linalg.norm(_np.asarray(pa) - _np.asarray(pb)))
+            # A SEGMENT LONGER THAN AN ARM IS NOT AN ARM. A depth sample that
+            # lands past the person -- on the wall, a doorway, the bunk
+            # behind them -- produces a joint metres away, and the distance
+            # between it and a good joint is a number no body has. Measured:
+            # a shoulder sampled off the person gave a 1683mm shoulder width.
+            #
+            # live_body's own Measured.add() has per-dimension bounds and
+            # would reject most of these. This is the cruder guard in front
+            # of it, because a 700mm "forearm" sits inside some of those
+            # ranges while still being nonsense, and because a wrong sample
+            # should be refused where it is taken rather than where it is
+            # stored.
+            return d if 20.0 < d < 700.0 else None
+
+        _BODY_DIMS["shoulders"].add(seg("l_shoulder", "r_shoulder"))
+        # BOTH ARMS FEED THE SAME ACCUMULATOR. They are the same person's
+        # upper arm; two samples per frame is twice the evidence, and the
+        # running median handles one arm being occluded.
+        for sh, el, wr in (("l_shoulder", "l_elbow", "l_wrist"),
+                           ("r_shoulder", "r_elbow", "r_wrist")):
+            _BODY_DIMS["upper_arm_len"].add(seg(sh, el))
+            _BODY_DIMS["forearm_len"].add(seg(el, wr))
+    except Exception:                                        # noqa: BLE001
+        # A body that cannot be measured is the generic adult, which is what
+        # the page already draws. Never the loop's problem.
+        return
+
+
+def _sample_body():
+    """The measured body for the wire. -> dict or None.
+
+    None means nothing has been measured, and the page keeps its baked
+    default rather than being handed a prior dressed as a measurement.
+    """
+    if _BODY_DIMS is None or _BODY_LB is None:
+        return None
+    try:
+        from scene_out import body_measurements
+        b = body_measurements(
+            _BODY_DIMS, circ_of=_BODY_LB.circ_of,
+            limb_p=_BODY_LB.LIMB_P, torso_p=_BODY_LB.TORSO_P,
+            limb_flatten=_BODY_LB.AN.ADULT["limb_flatten"],
+            torso_flatten=_BODY_LB.AN.ADULT["torso_flatten"])
+        # src "prior" means every value is still the typical adult. Sending
+        # that would be sending the default twice, and the page would light
+        # up "MEASURED" for a body nobody measured.
+        return b if b.get("src") == "depth" else None
+    except Exception:                                        # noqa: BLE001
+        return None
 
 
 def _sample_joints(arm):
@@ -1534,6 +1633,19 @@ def vision_loop(arm, args):
         if _limbs is not None:
             with LOCK:
                 EVENT["limbs"] = _limbs() or None
+
+        # HOW BIG THIS PERSON IS, from the same frame. Fed only the joints
+        # that were MEASURED this tick (vision sets world_measured), so a
+        # generic-human estimate can never be laundered into a measurement.
+        # Published sticky: proportions do not change when somebody leans
+        # out of frame, unlike the pose above.
+        _wm = getattr(feed, "world_mm", None)
+        if _wm:
+            _measure_body(_wm, getattr(feed, "world_measured", set()))
+            _b = _sample_body()
+            if _b is not None:
+                with LOCK:
+                    EVENT["body"] = _b
 
         # SAME REASON, SAME PLACE: the gravity model may only learn from
         # samples taken while the sponge is provably not on a person. IDLE is
