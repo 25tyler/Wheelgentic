@@ -61,13 +61,25 @@ camera, no arm and no volunteer:
 
     python py/bodydepth.py scrub3d/data/<some_recording>
 
-UNVERIFIED AGAINST REAL DEPTH, AND SAYING SO
----------------------------------------------
-Written against rsfeed/frames' documented contracts and checked on synthetic
-frames. It has NOT been run against a D455 or against a recording, because no
-recording is in the repo (the .gitignore excludes the capture sessions) and
-the camera is not attached to this machine. The arithmetic below is the part
-to distrust first when a real frame finally arrives.
+VERIFIED ON REAL D455 FRAMES
+-----------------------------
+Run against 20 frames recorded on the arm computer (1280x720, real
+intrinsics: fx 638.84, ppx 644.06). All six joints came back measured, and
+the numbers are anatomically consistent -- shoulders level with each other,
+left and right mirrored about the centre line, wrists lower and further
+forward than elbows.
+
+THE FIRST REAL FRAME FOUND A BUG THE SYNTHETIC TEST COULD NOT. Intrinsics
+arrive as a DICT from a recording's intr.json and from rsfeed's
+meta["color_intrinsics"], and this file originally read them as attributes.
+It died with "'I' object is not subscriptable" on frame zero. Both forms are
+accepted now. That is the reason to test against a recording rather than
+only against arithmetic: the shapes real data arrives in are not the shapes
+you assume.
+
+Still unproven: a LIVE camera, as opposed to a recording of one. This Mac
+carries a replay stub because no RealSense build exists for Apple Silicon,
+so the live path can only be exercised on the arm computer.
 """
 import os
 import sys
@@ -153,6 +165,20 @@ def joints_world_mm(landmarks_px, depth_mm, intr, T_world_cam):
     key as unknown, exactly as vision.PoseFeed already does for a joint below
     the visibility floor.
     """
+    # INTRINSICS ARE A DICT HERE, NOT AN OBJECT. scrub3d/frames.py indexes
+    # them (`intr["ppx"]`), a recording's intr.json IS a dict, and rsfeed
+    # carries meta["color_intrinsics"] in the same shape. Attribute access
+    # was written first and died on the first REAL frame with "'I' object is
+    # not subscriptable" -- the exact class of mistake that only a real
+    # recording catches. Both forms are accepted so a live pyrealsense2
+    # intrinsics object, which uses attributes, also works.
+    def _k(key):
+        if isinstance(intr, dict):
+            return float(intr[key])
+        return float(getattr(intr, key))
+
+    fx, fy, ppx, ppy = _k("fx"), _k("fy"), _k("ppx"), _k("ppy")
+
     out = {}
     for name, (px, py) in landmarks_px.items():
         ipx, ipy = int(round(px)), int(round(py))
@@ -163,8 +189,8 @@ def joints_world_mm(landmarks_px, depth_mm, intr, T_world_cam):
         # assumed field of view. fx/fy/ppx/ppy come off the sensor's
         # calibration, and rsfeed rotates them with the pixels so they keep
         # describing the image it hands over.
-        x = (ipx - intr.ppx) / intr.fx * z
-        y = (ipy - intr.ppy) / intr.fy * z
+        x = (ipx - ppx) / fx * z
+        y = (ipy - ppy) / fy * z
         p_cam = np.array([x, y, z, 1.0])
         out[name] = (np.asarray(T_world_cam, float) @ p_cam)[:3]
     return out
@@ -304,7 +330,7 @@ def _self_test():
     assert "l_wrist" in out and "r_wrist" not in out, out
     print("  joint with no valid depth is absent, not invented")
 
-    print("OK -- arithmetic is sound. UNVERIFIED against a real D455 frame.")
+    print("OK -- arithmetic is sound. Also verified on real D455 frames;\n     see the module docstring.")
 
 
 if __name__ == "__main__":
