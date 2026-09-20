@@ -653,6 +653,20 @@ function limbsToLandmarks(mm) {
     if (!Array.isArray(p)) continue;
     const sx = p[0] - cx, sy = p[1] - cy, sz = p[2] - cz;
     // mm -> metres, and into MediaPipe's axes.
+    //
+    // THE VERTICAL IS NEGATED ONCE, NOT TWICE. scrub3d's world has +z UP;
+    // MediaPipe's world landmarks have +y DOWN, which is the convention
+    // avatar.js's V() is written against -- it negates y itself to get
+    // three.js's +y up. Negating here as well cancelled it: the drawn arms
+    // pointed up and outward instead of hanging.
+    //
+    // Measured on the recording, world frame: the upper arm drops 203mm
+    // from shoulder to elbow and the forearm a further 28mm, which is a
+    // person sitting with their hands on their knees. On screen that came
+    // out 93% horizontal and 10% downward -- arms raised out to the sides.
+    // The sign check that missed it compared left against right, and a
+    // flipped vertical is symmetric, so both arms were wrong the same way
+    // and looked consistent.
     out[i] = { x: sy / 1000, y: -sz / 1000, z: sx / 1000 };
   }
   // avatar.update() indexes up to LM.R_HIP (24) before it will pose

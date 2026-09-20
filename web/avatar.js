@@ -1228,8 +1228,19 @@ export async function makeAvatar(scene) {
       // Order is: advance the clip, THEN stamp the tracked pose over it.
       mixer.update(dt);
       if (wl && wl.length > LM.R_HIP) {
-        aim('arm-right', V(wl[LM.R_EL]), V(wl[LM.R_WR]));
-        aim('arm-left',  V(wl[LM.L_EL]), V(wl[LM.L_WR]));
+        // SHOULDER TO ELBOW, NOT ELBOW TO WRIST. The Kenney rig has ONE bone
+        // per arm, so the single direction it can take should be the one the
+        // arm as a whole reads as -- and that is the upper arm. Measured on a
+        // seated person with their hands on their knees: shoulder->elbow is
+        // 0.81 downward, elbow->wrist only 0.10. Aiming the one bone with the
+        // forearm drew both arms raised straight out to the sides, because a
+        // resting forearm really does point forwards; it is the UPPER arm
+        // that hangs.
+        //
+        // Legs keep knee->ankle below, and correctly: a seated shin does
+        // point down, so the lower segment is the readable one there.
+        aim('arm-right', V(wl[LM.R_SH]), V(wl[LM.R_EL]));
+        aim('arm-left',  V(wl[LM.L_SH]), V(wl[LM.L_EL]));
         // LEGS TOO. Same aim() path, same NaN guard, same springs -- MediaPipe
         // was already sending knees and ankles and nothing consumed them. Costs
         // two lines and makes the mirroring read as the whole body.
