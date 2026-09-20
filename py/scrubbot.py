@@ -177,6 +177,17 @@ ARM = None
 # and nothing else does.
 ARM_ID = "a0"
 
+# WHICH ARM "a0" IS ON THE BRIDGE. dimos_bridge_server names its two arms
+# "left" and "right"; live_rig_openyam.json says a0 is the one on
+# --left-can-port, which is the person's left. So a0 is "left" and the two
+# vocabularies meet here, once, rather than at every call site.
+ARM_SIDE = "left"
+
+# The reader for the real arms, or None when no bridge is configured. Set by
+# main() from SCRUB3D_DIMOS. Module-level because _sample_joints() runs on
+# the pump thread and must not build one per tick.
+_ARMLINK = None
+
 # How many joint angles the wire format carries per arm. SIX, because that is
 # what the OpenYAM has and what plan §5 3.1 specifies -- not three, which is
 # only what the RoArm's onboard IK can be solved back to. A driver that can
@@ -398,7 +409,16 @@ def _sample_joints(arm):
     # neither of which has this method; only the dimOS client does. hasattr
     # keeps this file from importing a driver it does not otherwise need.
     try:
-        real = arm.real_joints6() if hasattr(arm, "real_joints6") else None
+        # THE BRIDGE FIRST, when one is reachable. py/armlink.py reads the
+        # encoders through dimos_bridge_server's `state` op, which commands
+        # nothing -- so this works while somebody else is driving the arms,
+        # which is the normal case. Only when there is no bridge does this
+        # fall back to a driver that happens to expose real_joints6().
+        real = None
+        if _ARMLINK is not None and _ARMLINK.alive():
+            real = _ARMLINK.joints(ARM_SIDE)
+        if real is None:
+            real = arm.real_joints6() if hasattr(arm, "real_joints6") else None
     except Exception:                                        # noqa: BLE001
         real = None
     if real:
@@ -868,6 +888,19 @@ _SOLVE_REQUEST = threading.Event()
 LIVE_BODY = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "..", "web", "assets", "body-live.json")
 _solving = False           # one solve at a time; the solver is not reentrant
+
+# HAS THE MEASUREMENT ALREADY ASKED FOR ITS OWN SOLVE? See the auto-solve
+# block in remote_control_loop. One latch for the whole process: the body
+# being measured is THIS person, and a second solve of the same person would
+# re-run 1.3s of solver to write the numbers it already wrote.
+_auto_solved = False
+
+# How many 0.05s ticks the count of measured dimensions must hold still
+# before the auto-solve fires. See the block in remote_control_loop: this is
+# a SETTLING test rather than a delay, because the dimensions cross the
+# confidence threshold at different times and solving on the first one
+# rebuilds the body with the population's shoulders.
+_SETTLE_TICKS = 40
 
 # WHICH CAMERA THE MEASUREMENT OPENS. Set once from the parsed args in main(),
 # because _solve_live runs on its own thread with no access to them, and a
@@ -2209,7 +2242,12 @@ def remote_control_loop(arm):
     estopped from the projector at all -- and --scripted is the fallback most
     likely to be running when tracking has failed. Caught by a test.
     """
-    global ARMED, _armed_at
+    global ARMED, _armed_at, _auto_solved
+    # How many dimensions qualified last tick, and for how many ticks that
+    # count has not changed. Locals, not module state: they exist only to let
+    # the auto-solve below notice the measurement has stopped growing, and
+    # nothing outside this loop has any business reading them.
+    _settle_n, _settle_for = -1, 0
     while RUNNING:
         time.sleep(0.05)
         # ESTOP WINS, ALWAYS. Draining clear-then-estop in a fixed order let a
@@ -2271,6 +2309,52 @@ def remote_control_loop(arm):
             print(f"[fsm] ARMED (from the projector) — put a forearm in frame "
                   f"({ARM_TIMEOUT_S:.0f}s to start, "
                   f"{SESSION_BUDGET_S:.0f}s total)")
+        # A CONFIDENT MEASUREMENT ASKS FOR ITS OWN SOLVE, ONCE.
+        #
+        # The measurements used to exist only when somebody pressed 'v'. They
+        # now accumulate continuously off every frame the vision loop already
+        # ran, so the moment the wire carries a body worth solving, nothing
+        # should have to ask.
+        #
+        # ONCE PER PERSON, NOT PER FRAME. partition.solve measures 1.1-3.8s
+        # here against a 15Hz loop -- a solve per frame would be a solve queue
+        # that never drains. `_auto_solved` latches so this fires exactly once.
+        #
+        # WAIT FOR THE SET TO STOP GROWING, NOT FOR THE FIRST DIMENSION.
+        # Dimensions do not cross the confidence threshold together: both arms
+        # feed upper_arm_len and forearm_len every frame, so those get two
+        # samples a frame, while shoulders get one and therefore arrive about
+        # half as fast. MEASURED on the sample recording -- firing on the first
+        # qualifying dimension solved at 2 of 9, with biacromial_mm still
+        # below threshold, so the body was rebuilt with the population's
+        # 390mm shoulders for a person measured at 340mm. Shoulder width is
+        # the dimension that most changes the drawn body, and it was the one
+        # being missed.
+        #
+        # _SETTLE_TICKS is a settling test, not a timeout: it fires when the
+        # COUNT of qualifying dimensions has held still for that many ticks,
+        # so a slower camera waits longer and a faster one waits less. At
+        # 0.05s a tick, 40 ticks is 2s of no new dimension arriving, against
+        # the ~2.7s biacromial took to cross behind the arms on this
+        # recording.
+        #
+        # THE LATCH IS NOT THE ONLY GUARD, and must not be. _solve_live holds
+        # `_solving` under LOCK and returns immediately when a solve is
+        # already running, so an operator pressing 'v' in the same tick this
+        # fires cannot start a second one. This sets the same flag the key
+        # sets, through the same single handler below -- not a second entry
+        # point into the solver.
+        if not _auto_solved:
+            _m, _d = measured_kwargs(_sample_body())
+            if len(_d) != _settle_n:
+                _settle_n, _settle_for = len(_d), 0
+            elif _d:
+                _settle_for += 1
+            if _d and _settle_for >= _SETTLE_TICKS:
+                _auto_solved = True
+                print(f"[solve] auto: {len(_d)} dimension(s) measured and "
+                      f"settled — re-solving the partition for this person")
+                _SOLVE_REQUEST.set()
         if _SOLVE_REQUEST.is_set():
             _SOLVE_REQUEST.clear()
             # ITS OWN THREAD, not this one. This loop is the only thing that
@@ -2589,6 +2673,29 @@ def main():
     # itself is 0.08ms, which is why it can sit in the frame loop.
     global GOV
     from governor import Governor
+    # THE REAL ARMS, IF A BRIDGE IS REACHABLE. Read only: armlink sends
+    # `state` and nothing else, so this is safe to run while somebody is
+    # driving the arms from the machine that owns them. Started before the
+    # governor only because it takes a moment to get its first reading and
+    # nothing depends on it.
+    #
+    # With SCRUB3D_DIMOS unset this is a no-op and every joint angle on the
+    # wire stays "commanded", which is what the projector does on a laptop.
+    global _ARMLINK
+    try:
+        from armlink import ArmLink
+        _ARMLINK = ArmLink()
+        if _ARMLINK.endpoint is None:
+            _ARMLINK = None
+        else:
+            _ARMLINK.start()
+            print(f"[arm] reading the real arms from "
+                  f"{_ARMLINK.endpoint[0]}:{_ARMLINK.endpoint[1]} "
+                  f"(read only -- nothing is commanded)")
+    except Exception as exc:                                 # noqa: BLE001
+        print(f"[arm] no bridge reader: {exc!r} -- joints stay commanded")
+        _ARMLINK = None
+
     GOV = Governor.build(enabled=not args.no_governor)
     if GOV.armed:
         print(f"[gov] scrub3d safety governor ARMED ({GOV.why}). "

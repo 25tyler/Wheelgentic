@@ -1,37 +1,37 @@
 {
  "limits_deg": {
   "base": [
-   -150.0,
-   180.0
+   -90.0,
+   90.0
   ],
   "elbow": [
-   0.0,
+   -57.3,
    180.0
   ],
   "shoulder": [
-   0.0,
-   210.0
+   -90.0,
+   90.0
   ]
  },
  "mm": {
-  "base_height": 113.5,
-  "fore": 458.6,
-  "r_base": 101.83,
-  "r_eoat": 90.32,
-  "r_fore": 91.54,
-  "r_upper": 44.49,
-  "reach_max": 722.6,
-  "upper": 264.0
+  "base_height": 123.06,
+  "fore": 280.21,
+  "r_base": 57.28,
+  "r_eoat": 68.15,
+  "r_fore": 28.34,
+  "r_upper": 45.04,
+  "reach_max": 518.92,
+  "upper": 238.71
  },
- "mm_per_unit": 588.803,
+ "mm_per_unit": 452.095,
  "source": "scrub3d/kinematics.py + scrub3d/armmesh.py (roarm URDF/STL)",
  "units": {
-  "d_eoat": 0.3068,
-  "fore": 0.7789,
-  "shoulder_pivot": 0.1928,
-  "upper": 0.4484,
-  "w_base": 0.3459,
-  "w_fore": 0.3109,
-  "w_upper": 0.1511
+  "d_eoat": 0.3015,
+  "fore": 0.6198,
+  "shoulder_pivot": 0.2722,
+  "upper": 0.528,
+  "w_base": 0.2534,
+  "w_fore": 0.1254,
+  "w_upper": 0.1992
  }
 }

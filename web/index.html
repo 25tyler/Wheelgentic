@@ -107,6 +107,16 @@
      someone. See the block in main.js for why it counts what it
      counts. -->
 <div id="care"></div>
+<!-- WHOSE BODY IS ON SCREEN. Empty markup, filled by main.js only when the
+     backend sends a measurement that cleared the confidence threshold, so a
+     page with nothing running never paints it and looks exactly as it did
+     before this element existed.
+
+     It sits above #counts because the two answer the same question in order:
+     this says which body was drawn, those say how the arms divided it. A
+     judge reading the cell counts without knowing whose body they describe
+     is the gap docs/MEASURED-NOT-TYPED.md was written about. -->
+<div id="body"></div>
 <div id="counts"></div>
 <div id="ecg"></div>
 <div id="heard"></div>

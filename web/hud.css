@@ -163,6 +163,40 @@ body.complete #pct { color:#6bcf7f }
 #governor .refuse  { color:#ff8b6b; }
 
 
+/* ---- WHOSE BODY IS ON SCREEN ----------------------------------------
+   Directly above #counts and in the same column, because the two read as
+   one block: this names the body, those divide it.
+
+   38vh IS MEASURED, NOT CHOSEN. #counts sits at bottom:24vh and grows with
+   the solve -- six rows at 1080p put its TOP at y=685, which is 36.6vh up
+   from the bottom. My first pass used 33vh by eyeballing "a bit above
+   24vh", and the screenshot showed this panel's second and third lines
+   printed straight through "ARM 0 0 cells" and "ARM 1 6 cells": two text
+   blocks overlapping, both unreadable. 38vh clears the measured top with a
+   small gap and still reads as the same column.
+
+   Hidden until main.js adds .on, which it only does for a measurement that
+   cleared the confidence threshold. A page with no backend never gets the
+   class, so this costs the shipped demo nothing. */
+#body { position:fixed; left:3vh; bottom:38vh; z-index:55;
+        font-family:'PS2P',monospace; font-size:clamp(8px,1.05vh,15px);
+        line-height:2; opacity:0; transition:opacity .4s ease; }
+#body.on { opacity:1; }
+#body .row { letter-spacing:.04em; }
+/* The verdict leads, in the cyan the mode strip already uses for "this is
+   the active, confirmed thing". */
+#body .hd { color:#4ec9f5; }
+/* The fraction that makes the verdict checkable. Same near-white the
+   cleanliness number uses, so the one number a judge is asked to read is
+   the brightest thing in the block. */
+#body .n { color:#dce6f5; }
+/* The rebuild confirmation: green, the same "this went right" green
+   #care .z uses, so the two good-outcome lines on screen match. */
+#body .ok { color:#6bcf7f; }
+/* Everything that is context rather than claim. #8fa2c4 for the same
+   contrast reason #counts .un gives: 4.51:1, readable from ten feet. */
+#body .k { color:#8fa2c4; opacity:.75; letter-spacing:.02em; }
+
 /* ---- PER-ARM TERRITORY COUNTS ---------------------------------------
    Under the scan on the left, in the same four colours the cells use,
    so a row and a region are obviously the same thing. */

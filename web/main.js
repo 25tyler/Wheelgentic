@@ -613,6 +613,30 @@ let armJointsSrc = null;
 let limbsSrc = null;
 let limbsSeen = 0;
 
+// HOW MUCH OF THE DRAWN BODY WAS ACTUALLY MEASURED.
+//
+// `bodyMeasuredDims` counts only the dimensions whose confidence cleared the
+// threshold; `bodyTotalDims` is how many the model takes in all, so the
+// readout can say "3 of 9" rather than "measured". `bodyFrames` is how much
+// depth is behind them.
+//
+// ZERO IS THE HONEST DEFAULT AND THE SHIPPED ONE. With no backend these stay
+// 0 and showBody() leaves the panel empty, so the page with nothing running
+// is byte-identical to the one before this existed. They are never cleared
+// once set, because the measurement is sticky on the wire for the reason its
+// handler states: a body's proportions do not change when its owner leans
+// out of frame.
+let bodyMeasuredDims = 0;
+let bodyTotalDims = 0;
+let bodyFrames = 0;
+// Did a live solve actually REBUILD the drawn body from those numbers? The
+// two facts are separate and the panel must not merge them: the backend can
+// be measuring a person perfectly while the body on screen is still the
+// bake, which is exactly the state between the measurement settling and the
+// solver finishing. Set from m.solve, which is the only thing that can say
+// the drawn geometry changed.
+let bodySolved = false;
+
 // The measured-body overlay, or null if its bake is missing. Every consumer
 // uses `territories?.` because a missing file must not cost the demo.
 let territories = null;
@@ -1428,6 +1452,69 @@ async function swapBody() {
   // Released whether or not the fetch produced a body, so a failed swap
   // does not wedge the key for the rest of the demo.
   swapBusy = false;
+}
+
+/** SAY WHOSE BODY IS ON SCREEN. Reads the module state the socket sets.
+ *
+ * THE WORDING IS THE WHOLE FUNCTION, and docs/MEASURED-NOT-TYPED.md is
+ * explicit about why: "a generic body drawn as if it were the person in the
+ * chair is the exact failure this document exists to prevent."
+ *
+ * Three states, and the middle one is the one that needed inventing:
+ *
+ *   (nothing)            no backend. The page draws the baked body.json and
+ *                        says nothing, exactly as it did before this panel
+ *                        existed. SILENCE, NOT "GENERIC" -- see below.
+ *   BODY PART-MEASURED   some dimensions came off depth, the rest are still
+ *   3 OF 9 DIMENSIONS    the population table, and the solver has rebuilt
+ *                        the body from the measured ones.
+ *   BODY MEASURED        every dimension the model takes was measured.
+ *
+ * WHY "PART-MEASURED" AND NOT "MEASURED". On the real recording this was
+ * built against, three of the nine dimensions reach confidence 0.882 and six
+ * sit at exactly 0.0 -- nothing samples a circumference off 3D joints. Those
+ * six are anatomy.ADULT, the typical-adult table, and the body on screen is
+ * genuinely this person's shoulder width wearing a typical adult's chest.
+ * "MEASURED" claims the chest too. The number beside it is what makes the
+ * word checkable rather than a softer adjective doing the same overclaiming.
+ *
+ * WHY THE NO-BACKEND PAGE SAYS NOTHING RATHER THAN "BODY GENERIC". The spec
+ * asks the HUD to distinguish measured from generic, and an empty panel does
+ * distinguish them -- but a label has to be TRUE of the thing it points at,
+ * and with no backend there is no person in the chair to be generic about.
+ * The word would be describing a drawing of nobody. It is also the one
+ * change that would alter the no-backend page, which rule 2 forbids
+ * outright. The modes strip already carries "scanned body" as the standing
+ * claim for that state, and this panel appears the moment a real measurement
+ * contradicts or confirms it.
+ */
+function showBody() {
+  const host = document.getElementById('body');
+  if (!host) return;
+  // Nothing measured means nothing to say. This is the no-backend state and
+  // it must stay silent -- the panel has opacity 0 until .on is added, so an
+  // untouched page never paints it at all.
+  if (!bodyMeasuredDims) { host.classList.remove('on'); return; }
+  const all = bodyMeasuredDims >= bodyTotalDims && bodyTotalDims > 0;
+  const word = all ? 'MEASURED' : 'PART-MEASURED';
+  // NAME THE SOURCE, NOT JUST THE VERDICT. "3 OF 9 DIMENSIONS" is the claim
+  // a judge can check against the body they are looking at; the frame count
+  // is how much depth stands behind it.
+  const rows = [
+    `<div class="row hd">BODY ${word}</div>`,
+    `<div class="row n">${bodyMeasuredDims} OF ${bodyTotalDims} DIMENSIONS`
+      + `<span class="k">  ${bodyFrames} FRAMES OF DEPTH</span></div>`,
+  ];
+  // THE MEASUREMENT AND THE DRAWING ARE TWO DIFFERENT CLAIMS. Between the
+  // numbers settling and the solver finishing -- about a second, and longer
+  // on a slower body -- the backend has measured this person while the shape
+  // on screen is still the bake. Saying "measured" during that window would
+  // point the word at geometry nobody has rebuilt yet.
+  rows.push(bodySolved
+    ? `<div class="row ok">BODY REBUILT FROM THESE NUMBERS</div>`
+    : `<div class="row k">DRAWING THE BAKED BODY — NOT YET REBUILT</div>`);
+  host.innerHTML = rows.join('');
+  host.classList.add('on');
 }
 
 function showCounts(t) {
@@ -2953,8 +3040,26 @@ function startScrubChoreography() {
       // one claim this whole feature exists to support. Measured on a headless
       // run with no usable pose: state 'ready', measured false, and without
       // this line the screen still read LIVE SCAN.
-      flash(m.solve.measured ? `MEASURED THIS PERSON — ${m.solve.secs}s`
-                             : `RE-SOLVED (no measurement) — ${m.solve.secs}s`);
+      //
+      // n_dims SHARPENS THE SAME CLAIM. `measured` is a yes/no and the true
+      // answer today is "partly" -- three of the nine dimensions the model
+      // takes came off depth and six are still the population table. The
+      // banner says which, for the reason showBody() spells out at length:
+      // "MEASURED THIS PERSON" over a body whose chest is anatomy.ADULT is
+      // the overclaim this whole feature exists to remove. Falls back to the
+      // old wording when the backend did not send a count, so an older
+      // backend against a newer page still reads correctly.
+      const nd = m.solve.n_dims;
+      flash(!m.solve.measured
+              ? `RE-SOLVED (no measurement) — ${m.solve.secs}s`
+              : typeof nd === 'number'
+                ? `MEASURED THIS PERSON — ${nd} DIMENSIONS, ${m.solve.secs}s`
+                : `MEASURED THIS PERSON — ${m.solve.secs}s`);
+      // THE DRAWN BODY IS NOW THE SOLVED ONE. showBody() keeps this separate
+      // from the measurement itself because they become true at different
+      // moments; this is the one place that can say the geometry changed.
+      bodySolved = !!m.solve.measured;
+      showBody();
       // Only disturb what is on screen if the fresh body is what should be
       // showing. Pressing 'n' to the alternate body and then having a solve
       // land would otherwise yank the alternate away mid-comparison.
@@ -3046,6 +3151,57 @@ function startScrubChoreography() {
       // person standing where they are not.
       limbsSrc = null;
       limbsSeen = 0;
+    }
+
+    // HOW BIG THE PERSON ACTUALLY IS. `m.body` carries the measurements
+    // scrub3d/live/live_body.py takes off the depth camera -- nine dimensions
+    // in the exact key names anatomy.anatomical_body(measurements=) accepts,
+    // each with its OWN confidence, plus how many frames back them.
+    //
+    // STICKY, AND DELIBERATELY UNLIKE m.limbs ABOVE. A body's proportions do
+    // not change when the person leans out of frame, so the last measurement
+    // of THIS person stays true until somebody else sits down. Clearing it on
+    // a frame with nobody in it -- which is what the limbs block three lines
+    // up correctly does for POSE -- would make the readout flicker between
+    // measured and generic while a person simply turned their head.
+    //
+    // WHY THIS ONLY RECORDS, AND DOES NOT REBUILD THE BODY ITSELF. The
+    // drawn body is rebuilt on the BACKEND, by the same solver the bake runs
+    // (py/scrubbot.py's _solve_live -> tools/export_body.export_one), and it
+    // arrives here as a filename on m.solve, handled above. The alternative
+    // was rebuilding the mesh in the browser from these nine numbers, and
+    // that would be a second implementation of scrub3d/anatomy.py written in
+    // a language that cannot import it -- two body builders that must agree
+    // forever, drifting the first time either is touched. The partition the
+    // arms plan against comes out of the solver too, so a browser-side mesh
+    // would also be a body the arms had never planned against.
+    //
+    // SO WHAT IS THIS FOR: saying what is on screen. The count of dimensions
+    // that were genuinely measured is the thing the banner needs and the
+    // filename cannot carry.
+    if (m.body && m.body.mm && m.body.confidence) {
+      // ONLY WHAT WAS MEASURED COUNTS. Every key in `mm` has a value whether
+      // or not anyone measured it -- scrub3d/live/scene_out.py says so in its
+      // own header: a dimension with no samples is reported as the typical-
+      // adult prior WITH confidence 0.0. Counting the keys would therefore
+      // report nine measured dimensions for a body where three were measured
+      // and six are anatomy.ADULT echoed back.
+      //
+      // 0.5 is the same threshold the backend solves on (scrubbot's
+      // _MEASURE_MIN_CONF); both sides have to agree or the banner describes
+      // a different body than the one the solver built.
+      let n = 0;
+      for (const k of Object.keys(m.body.mm)) {
+        if ((m.body.confidence[k] ?? 0) >= 0.5) n++;
+      }
+      const total = Object.keys(m.body.mm).length;
+      if (n !== bodyMeasuredDims || total !== bodyTotalDims
+          || m.body.n_frames !== bodyFrames) {
+        bodyMeasuredDims = n;
+        bodyTotalDims = total;
+        bodyFrames = m.body.n_frames | 0;
+        showBody();
+      }
     }
 
     if (!(m.joints && m.joints.arms) && armJointsSrc !== null) {
