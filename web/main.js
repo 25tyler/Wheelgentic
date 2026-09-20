@@ -3737,6 +3737,29 @@ renderer.setAnimationLoop(() => {
   }
 });
 
+// ---- the start gate -------------------------------------------------------
+// A POINTER OPENS IT TOO, NOT JUST A KEY.
+//
+// The gate exists to get audio unlocked inside a real user gesture, and a
+// click or a tap is exactly as much of a gesture as a keypress. Listening
+// only for keys stranded two cases: the chair's own touchscreen, which has no
+// keyboard at all, and our 3D view opened from inside Crystal's UI -- there
+// the person has ALREADY pressed a task, and is then met with PRESS ANY KEY
+// over a dimmed scene, inside a modal, with nothing to press.
+//
+// It still says PRESS ANY KEY because a projector demo is driven from a
+// keyboard and that is the instruction the operator needs. The pointer is the
+// path that was missing, not the one being advertised.
+function openGate() {
+  const gate = document.getElementById('gate');
+  if (!gate) return false;
+  unlockAudio();                                // MUST be inside a gesture
+  gate.remove();
+  startPose();
+  return true;
+}
+addEventListener('pointerdown', openGate);
+
 // ---- keyboard: every manual fallback the demo needs ----------------------
 addEventListener('keydown', async (e) => {
   // THE GATE MUST ACTUALLY GATE. It says "PRESS ANY KEY TO START", but only
@@ -3745,13 +3768,7 @@ addEventListener('keydown', async (e) => {
   // splotch and drove the counter to 33% while the gate was still up, with
   // audio still locked. Any key now dismisses it and nothing else fires on
   // that keypress.
-  const gate = document.getElementById('gate');
-  if (gate) {
-    unlockAudio();                              // MUST be inside a gesture
-    gate.remove();
-    startPose();
-    return;
-  }
+  if (openGate()) return;
   if (e.key === 'Enter' || e.key === ' ') return;   // gate already handled
   // ARM one scrub cycle FROM THE PROJECTOR. The Python-side 's' lives in the
   // OpenCV debug window, which is behind Chrome in kiosk mode on stage -- the
@@ -4904,6 +4921,17 @@ function applyTaskView() {
     return;
   }
   if (!key) return;                       // the projector page. Nothing below runs.
+  // NO START GATE IN A TASK VIEW. The gate is there to get audio unlocked
+  // inside a user gesture, and by the time this runs the person has already
+  // made one -- they pressed Eating or Take Meds in her UI, which is what
+  // opened this page. Leaving it up means a caretaker who asked for a meal
+  // gets PRESS ANY KEY over a dimmed scene, in a modal, on a chair whose
+  // screen has no keyboard.
+  //
+  // Audio still waits for a gesture INSIDE this document, because a gesture
+  // in her page does not unlock this one: the first pointerdown or key here
+  // does it, through the same openGate path the projector uses.
+  document.getElementById('gate')?.remove();
   const v = VIEWS[key.toLowerCase()];
   if (!v) {
     // AN UNKNOWN VIEW IS THE PROJECTOR VIEW, not an error page. She may ship a

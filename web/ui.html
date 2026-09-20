@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Wheelgentic - the product</title>
+<!--
+  THE PRODUCT ON ITS OWN: Crystal's carechair UI, with our 3D view opening
+  over it when a task is picked. Press Showering, Eating or Take Meds and the
+  cartoon appears the way it does for somebody actually using the chair.
+
+  This is compare.html with the right-hand column removed. That page puts
+  live_body.py's Rerun viewer beside her UI so the cartoon and the
+  measurement it is built from can be checked against each other, which is a
+  thing to do while building and not a thing to show anybody. Here there is
+  no second panel, nothing from scrub3d, and nothing to start but her server.
+
+  The cartoon reaches the page through web/carechair-embed.js, which attaches
+  from outside and touches none of her files. Her side is one line in her
+  static table and a script tag.
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #0d1017; }
+  /* Full bleed. The UI is the whole product here, so there is no chrome
+     around it -- a frame with a title bar would be this page inventing a
+     wrapper the real thing does not have. */
+  iframe { width: 100%; height: 100%; border: 0; display: block; }
+</style>
+
+<iframe src="http://localhost:5173/" title="carechair"></iframe>
+
+<script>
+// Nothing to drive from here. Her UI is a live application talking to her own
+// server, and the 3D view is opened by the embed script running inside it.
+// A page that positions one iframe should not also re-implement what is in it.
+</script>

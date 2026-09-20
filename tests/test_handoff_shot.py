@@ -101,8 +101,12 @@ async def main():
         await pg.wait_for_timeout(600)           # interrupt mid-move
         await pg.keyboard.press("8")             # feed sets its own shot
         await pg.wait_for_timeout(2500)
+        # "MEAL RUN", NOT "FEEDING". The label named an outcome -- feeding,
+        # drinking, medication -- and each claims something reached a person,
+        # when there is no food, cup or pill anywhere in the program and the
+        # arm only travels. It names the errand the operator asked for now.
         check("feed still opens over an unfinished handoff move",
-              "FEEDING" in await pg.evaluate(
+              "MEAL RUN" in await pg.evaluate(
                   "document.getElementById('label').textContent"),
               await pg.evaluate("document.getElementById('label').textContent"))
 
