@@ -507,6 +507,20 @@ function stepSteam(dt, want) {
     steamPos[i * 3 + 2] += Math.cos(steamAge[i] * 1.7 + i) * 0.09 * h;
     steamAge[i] += h;
     if (steamPos[i * 3 + 1] > FLOOR_Y + 3.0) steamSeed(i, false);
+    // IN A CARE VIEW, NO PUFF BETWEEN THE CAMERA AND THE CHARACTER. The shot
+    // there is tight on the character, in a small window in her UI, and a puff
+    // a third of the frame wide drifting across the face reads as a bluish
+    // film that comes and goes over them: it was reported as a glitch. A
+    // puff on the camera's side of the character is put the same distance
+    // behind them instead. The steam stays, around and behind; the
+    // projector's wide shot is untouched.
+    if (taskView) {
+      const x = steamPos[i * 3], z = steamPos[i * 3 + 2];
+      if (x * camera.position.x + z * camera.position.z > 0) {
+        steamPos[i * 3] = -x;
+        steamPos[i * 3 + 2] = -z;
+      }
+    }
   }
   steamGeo.attributes.position.needsUpdate = true;
 }
