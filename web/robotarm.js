@@ -353,9 +353,11 @@ export function makeRobotArm(scene, ramp, region) {
   const wrist = joint(0.09, 0.24);
   wrist.position.y = GEOM.fore;
   fore.add(wrist);
+  // The mount goes with the sponge: it is the thing that holds it, and a
+  // tool head that stays still while its own bracket turns reads as broken.
   const mount = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.1, 0.18), mat(BASE));
-  mount.position.y = GEOM.fore - 0.02;
-  fore.add(mount);
+  mount.position.y = -0.02;
+  wrist.add(mount);
 
   // SPONGE KEEPS ITS NAME, ITS PARENT AND ITS y=0.62. Tests read its world
   // position to check the sponge meets the dirt; moving it would break the one
@@ -381,8 +383,24 @@ export function makeRobotArm(scene, ramp, region) {
   // rescue of a wrong file.
   const sponge = new THREE.Mesh(
     new THREE.BoxGeometry(GEOM.d_eoat, 0.18, 0.26), mat(SPONGE));
-  sponge.position.y = SPONGE_CHAIN - GEOM.shoulder_pivot - GEOM.upper;
-  fore.add(sponge);
+  // ON THE WRIST, NOT ON THE FOREARM, SO THE WRIST ACTUALLY CARRIES IT.
+  // The wrist group above turns from joints 4 to 6, but with the tool
+  // parented to `fore` that rotation moved nothing a viewer could see: the
+  // arm's own wrist mesh twisted and the sponge stayed put.
+  //
+  // Measured against the OpenYAM URDF, on the real arms' current pose: with
+  // the wrist held at home the tool sits 146mm (left) and 225mm (right)
+  // from where the real wrist angles put it. That is the whole error, and
+  // it lands exactly where the tool meets the person.
+  //
+  // The y offset is the same total as before, less the wrist's own height,
+  // so the sponge is in the IDENTICAL world position at the home pose --
+  // SPONGE_CHAIN is solved against the measured dirt placement and
+  // tests read this mesh's world position to check the sponge meets the
+  // skin. Reparenting must not move it; it must only let it follow.
+  sponge.position.y = SPONGE_CHAIN - GEOM.shoulder_pivot - GEOM.upper
+                      - GEOM.fore;
+  wrist.add(sponge);
 
   scene.add(root);
 
