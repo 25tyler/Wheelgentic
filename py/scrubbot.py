@@ -869,7 +869,22 @@ def _measure_person(cam_index=0, model_path="models/pose_landmarker_full.task",
             running_mode=mpv.RunningMode.VIDEO,
             output_segmentation_masks=True, num_poses=1)
         lmk = mpv.PoseLandmarker.create_from_options(opts)
-        cap = cv2.VideoCapture(cam_index)
+        # THE SAME SOURCE THE VISION LOOP IS ON. Opening a raw camera here
+        # was right when the only alternative was a webcam, but under
+        # CAM=replay there is no camera to open and this returned "no camera
+        # to measure with" on a machine that had a whole recording of a real
+        # person with real depth. Opening its own capture is still correct --
+        # see the docstring: the hot loop's read() deliberately carries no
+        # segmentation mask -- so this opens a SECOND replay over the same
+        # folder rather than borrowing the loop's.
+        if os.environ.get("CAM", "").lower() == "replay":
+            from replaycam import ReplayCapture, find_recording
+            rec = find_recording(os.environ.get("REC"))
+            if rec is None:
+                return {}, "CAM=replay but no recording found"
+            cap = ReplayCapture(rec, loop=False)
+        else:
+            cap = cv2.VideoCapture(cam_index)
         if not cap.isOpened():
             return {}, "no camera to measure with"
 
@@ -893,7 +908,14 @@ def _measure_person(cam_index=0, model_path="models/pose_landmarker_full.task",
             h, w = frame.shape[:2]
             lms = np.array([[l.x * w, l.y * h] for l in L])
             vis = np.array([l.visibility for l in L])
-            person = res.segmentation_masks[0].numpy_view() > 0.5
+            # SQUEEZE THE TRAILING CHANNEL. MediaPipe hands the mask back as
+            # (H, W, 1) on this build, and measure.py combines it with a 2D
+            # band: `(720,1280,1) & (720,1280)` does not broadcast, the limb
+            # measurement raises inside its own try, and every limb comes
+            # back "no measurable cross-section" on a frame where the person
+            # is perfectly visible. Measured: 155,186 person pixels, a 7,884
+            # pixel band over the upper arm, and four refusals.
+            person = np.squeeze(res.segmentation_masks[0].numpy_view()) > 0.5
             if person.ndim == 3:
                 person = person[..., 0]
 
@@ -904,9 +926,34 @@ def _measure_person(cam_index=0, model_path="models/pose_landmarker_full.task",
             # carries the rig's real camera-to-torso distance; the default is
             # the value girth.py's own test uses for this rig.
             standoff = float(CFG.data.get("standoff_mm", 1050.0))
-            fx = float(CFG.data.get("camera_fx_px", 0.0)) or (w * 0.82)
+            # THE CAPTURE'S OWN fx WHEN IT HAS ONE. `w * 0.82` is a guess for
+            # a webcam with no calibration, and on this rig it is 1050
+            # against the D455's real 638.8 -- a 64% error straight into
+            # mm_per_px, which scales every width and length measured. It is
+            # why the limbs came back refused: the circumferences it produced
+            # fell outside CIRC_RANGE_MM and girth correctly threw them away.
+            #
+            # A replay carries intr.json and a live RealSense reports the
+            # same numbers, so the guess is only for the case it was written
+            # for: an uncalibrated camera.
+            _intr = getattr(cap, "intr", None)
+            fx = (float(_intr["fx"]) if _intr and _intr.get("fx")
+                  else float(CFG.data.get("camera_fx_px", 0.0)) or (w * 0.82))
+            # REAL DEPTH WHEN THE CAPTURE HAS IT. measure_person has always
+            # taken a depth image and has always been handed None, so every
+            # width it returned was a silhouette scaled by `standoff` -- one
+            # assumed distance for the whole body, from config. A person
+            # leaning forward, or simply sitting closer than 1050mm, was
+            # measured against a distance nobody checked.
+            #
+            # A depth capture (CAM=replay here, a D455 on the arm computer)
+            # has the real distance at every pixel, so the widths stop
+            # depending on that constant. Still falls back to it when there
+            # is no depth, which is the laptop-webcam case and has to keep
+            # working.
+            depth = getattr(cap, "depth_mm", None)
             m, rep = MEAS.measure_person(person, lms, vis, fx,
-                                         depth_mm=None,
+                                         depth_mm=depth,
                                          torso_depth_mm=standoff)
             n_ok = len(rep.get("limbs", {}))
             if n_ok > best_n:
