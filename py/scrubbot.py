@@ -221,6 +221,54 @@ def _sample_joints(arm):
     """
     if arm is None:
         return None
+
+    # MEASURED FIRST, WHEN AN ENCODER IS ACTUALLY READABLE. This is the one
+    # branch the docstring below promises, wired ahead of the hardware so the
+    # day the bridge is reachable nothing else has to move.
+    #
+    # THE SHAPE IS NOT GUESSED. scrub3d/live/dimos_bridge_server.py's own
+    # Stack.state() builds it: per side, {"p": [3] metres, "q": [4], "joints":
+    # [6] radians}, and joints come from dimOS's ordered joint positions, i.e.
+    # an encoder. arm_dimos.py already speaks that protocol and exposes the
+    # six as real_joints6(). So "measured" here means a number that came off
+    # the metal, and nothing else may write that string.
+    #
+    # WHY IT IS SAFE TO CALL. `state` is a READ on the bridge -- it returns a
+    # snapshot and commands nothing. It is not `target`, `home` or `gripper`.
+    # Reading cannot move an arm, which is why this is allowed while driving
+    # is not.
+    #
+    # DUCK-TYPED, NOT ISINSTANCE. The projector runs arm.py and openyam.py,
+    # neither of which has this method; only the dimOS client does. hasattr
+    # keeps this file from importing a driver it does not otherwise need.
+    try:
+        real = arm.real_joints6() if hasattr(arm, "real_joints6") else None
+    except Exception:                                        # noqa: BLE001
+        real = None
+    if real:
+        qm = [None] * N_JOINTS
+        for i in range(min(N_JOINTS, len(real))):
+            v = real[i]
+            # A joint the stack could not report stays None. dimOS sends null
+            # for an arm it has no pose for, and rounding a null to 0.0 would
+            # draw a straight arm and call it a measurement.
+            if v is not None:
+                qm[i] = round(float(v), 4)
+        if not all(v is None for v in qm):
+            err = None
+            try:
+                # The honest gap between where we asked and where it is. Only
+                # meaningful when BOTH exist; model_error() returns None when
+                # the driver has no commanded pose to compare against, and
+                # that None must survive rather than become a 0.0.
+                err = arm.model_error() if hasattr(arm, "model_error") else None
+                if err is not None:
+                    err = round(float(err), 1)
+            except Exception:                                # noqa: BLE001
+                err = None
+            return {"src": "measured", "arms": {ARM_ID: qm},
+                    "model_error_mm": err}
+
     q = [None] * N_JOINTS
     try:
         # THE COMMANDED JOINT VECTOR, PREFERRED, because it is what the pump
