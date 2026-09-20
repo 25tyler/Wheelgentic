@@ -257,6 +257,29 @@ class PoseFeed:
             self.cap = FakeCapture(
                 wave_left=os.environ.get("WAVE", "left").lower() != "right")
             print("[vision] CAM=fake — synthetic subject, NOT a real camera")
+        elif os.environ.get("CAM", "").lower() == "replay":
+            # CAM=replay plays a RECORDED SESSION through the same surface: a
+            # real person, recorded by the real D455, with a real distance
+            # behind every pixel. It is the only source on this machine that
+            # exercises depth at all -- the laptop camera has none and
+            # CAM=fake renders a figure rather than measuring one.
+            #
+            # REC=<folder> picks the recording; otherwise the first one under
+            # scrub3d/data/ is used. Those folders are gitignored (600MB of
+            # captured frames), so this is a no-op on a fresh clone and says
+            # so rather than falling through to a camera that is not there.
+            from replaycam import ReplayCapture, find_recording
+            rec = find_recording(os.environ.get("REC"))
+            if rec is None:
+                raise SystemExit(
+                    "\nCAM=replay but no recording found.\n"
+                    "  Put a capture session under scrub3d/data/ (folders of\n"
+                    "  <name>_c.png / <name>_d.png plus intr.json), or set\n"
+                    "  REC=/path/to/session. The sessions are gitignored, so\n"
+                    "  a fresh clone has none.\n")
+            self.cap = ReplayCapture(rec)
+            print(f"[vision] CAM=replay — {os.path.basename(rec)}, "
+                  f"{len(self.cap.names)} frames, REAL D455 depth")
         else:
             # FIND THE DEPTH CAMERA BY IDENTITY, not by index. `cam_index=0`
             # is a default, not a choice -- an explicit --cam N from the
@@ -376,6 +399,42 @@ class PoseFeed:
     # or down together and changes nothing about its shape or its pose.
     SEAT_Z_MM = 1050.0
 
+    # The camera-to-world transform, fitted ONCE from the floor plane rather
+    # than per frame. The floor does not move; re-fitting every frame would
+    # make the world jitter with the fit's own noise and a stationary person
+    # would appear to slide around the room. None until a depth frame with a
+    # findable floor arrives, and None forever on a colour-only camera.
+    _T_world_cam = None
+    # The joint names in world_mm that came off a depth sensor this frame.
+    world_measured = set()
+
+    def _fit_world_from_depth(self, depth_mm):
+        """Fit the floor and the world frame from one depth image.
+
+        Sets self._T_world_cam, or leaves it None. NEVER RAISES: no floor is
+        a normal condition (bags and cases around the chair are the usual
+        cause, which DIMOS.md already records), and it must cost the estimate
+        path nothing.
+        """
+        try:
+            from scrub3d import frames as _F
+            floor = _F.fit_floor(depth_mm, self.cap.intr)
+            if floor is None:
+                return
+            subj = _F.deproject(depth_mm, self.cap.intr,
+                                _F.subject_mask(depth_mm))
+            if not len(subj):
+                return                  # nobody in frame yet; try next frame
+            # The centroid puts the world origin on the floor beneath the
+            # person, which is where anatomy.anatomical_body() assumes they
+            # are. Passing None would put it under the CAMERA instead, and
+            # every joint would be offset by however far the camera stands
+            # from the chair.
+            self._T_world_cam = _F.world_from_camera(floor, subj.mean(0))
+            print("[vision] floor fitted — body joints are now MEASURED")
+        except Exception:                                    # noqa: BLE001
+            self._T_world_cam = None
+
     def _publish_world(self, res):
         """Fill self.world_mm from a detection. Never raises, never returns.
 
@@ -390,6 +449,44 @@ class PoseFeed:
                 return
             W = wl[0]
             out, vis = {}, {}
+
+            # MEASURED DEPTH WINS, WHEN THERE IS ANY. The block below places a
+            # joint by scaling MediaPipe's hip-centred landmarks and adding a
+            # seated-adult constant -- left/right and up/down are real, the
+            # DISTANCE is a guess from average human proportions. read()'s own
+            # docstring says never to command an arm from those.
+            #
+            # A depth source (CAM=replay today, a D455 on the arm computer
+            # later) can answer the same question by measurement, so it is
+            # preferred and the guess becomes the fallback. py/bodydepth.py
+            # owns that arithmetic; this only chooses between them.
+            #
+            # PARTIAL IS FINE AND IS THE POINT. Depth fills the joints it can
+            # actually see and leaves the rest to the block below, so an
+            # occluded wrist degrades to the estimate instead of vanishing.
+            # `world_src` records which joints were measured, so nothing
+            # downstream has to guess whether a number came off a sensor.
+            measured = {}
+            depth_mm = getattr(self.cap, "depth_mm", None)
+            if depth_mm is not None and getattr(self.cap, "intr", None):
+                try:
+                    import bodydepth as _bd
+                    if self._T_world_cam is None:
+                        self._fit_world_from_depth(depth_mm)
+                    if self._T_world_cam is not None:
+                        lm2d = getattr(res, "pose_landmarks", None)
+                        if lm2d:
+                            h, w = depth_mm.shape
+                            px = {n: (lm2d[0][i].x * w, lm2d[0][i].y * h)
+                                  for n, i in _bd.JOINT_IDX.items()}
+                            measured = _bd.joints_world_mm(
+                                px, depth_mm, self.cap.intr, self._T_world_cam)
+                except Exception:                            # noqa: BLE001
+                    # Same rule as the outer guard: a better source that
+                    # fails must leave the working one alone, not take the
+                    # frame down with it.
+                    measured = {}
+
             for name, idx in WORLD_IDX.items():
                 p = W[idx]
                 vis[name] = float(p.visibility)
@@ -400,6 +497,12 @@ class PoseFeed:
                 # last live pose and reports it lost after a second -- and
                 # that behaviour only works if absent really means absent.
                 if p.visibility < self.min_visibility:
+                    continue
+                # A measured joint replaces the estimate outright. Not blended:
+                # averaging a measurement with a guess produces a number that
+                # is neither, and nothing downstream could say which it was.
+                if name in measured:
+                    out[name] = measured[name]
                     continue
                 out[name] = (self._MP_TO_S3D
                              @ np.array([p.x, p.y, p.z]) * 1000.0
@@ -412,6 +515,10 @@ class PoseFeed:
                 if a in out and b in out:
                     out[new] = (out[a] + out[b]) / 2.0
             self.world_mm, self.world_vis = out, vis
+            # WHICH JOINTS CAME OFF A SENSOR. limb_event() reports this as
+            # `src`, so the page can say "measured" only about the ones that
+            # were. Empty means the whole skeleton is the estimate.
+            self.world_measured = set(measured)
         except Exception:                                    # noqa: BLE001
             # A side channel must never kill the arm's frame. Empty means
             # "no skeleton this frame", which every consumer already handles.
@@ -464,7 +571,16 @@ class PoseFeed:
             out[name] = [round(float(c), 1) for c in p]
         if not out:
             return {}
-        return {"src": "pose_2d_lifted", "mm": out}
+        # THE SOURCE IS PER-FRAME, NOT A CONSTANT. "depth_measured" only when
+        # every joint being reported was actually read off a depth sensor;
+        # "pose_2d_lifted" when none were; "mixed" when some were and some
+        # fell back, which is the honest answer for a partly occluded person
+        # and must not round up to "measured".
+        n_meas = sum(1 for k in out if k in self.world_measured)
+        src = ("depth_measured" if n_meas == len(out) and n_meas
+               else "mixed" if n_meas
+               else "pose_2d_lifted")
+        return {"src": src, "mm": out, "measured": n_meas, "total": len(out)}
 
     def read(self, elbow_idx=L_ELBOW, wrist_idx=L_WRIST):
         """-> (frame_bgr, elbow_px, wrist_px, dt). Never raises.
