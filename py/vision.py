@@ -610,7 +610,16 @@ class PoseFeed:
         src = ("depth_measured" if n_meas == len(out) and n_meas
                else "mixed" if n_meas
                else "pose_2d_lifted")
-        return {"src": src, "mm": out, "measured": n_meas, "total": len(out)}
+        # WHICH ONES, not just how many. A consumer that wants to draw only
+        # what a sensor reached cannot work it out from a count: the payload
+        # mixes measured joints with ones placed by the seated-adult
+        # constant, and they look identical. Naming them is two dozen bytes
+        # and it is the difference between a panel that shows a measurement
+        # and one that shows a measurement with a guess drawn beside it in
+        # the same colour.
+        return {"src": src, "mm": out, "measured": n_meas, "total": len(out),
+                "measured_names": sorted(k for k in out
+                                         if k in self.world_measured)}
 
     def read(self, elbow_idx=L_ELBOW, wrist_idx=L_WRIST):
         """-> (frame_bgr, elbow_px, wrist_px, dt). Never raises.
