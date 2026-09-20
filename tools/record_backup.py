@@ -142,7 +142,12 @@ async def main(seconds, cycles):
         pg = await ctx.new_page()
         errs = []
         pg.on("pageerror", lambda e: errs.append(str(e)))
-        await pg.goto("http://localhost:8000/", wait_until="load")
+        # ?nosteam: this clip deliberately never arms a cycle (see the note
+        # further down), so the room must not warm up either. Everywhere else
+        # the shower beat steams whether or not Python is running, because a
+        # shower with no steam reads as a machine rubbing a mannequin -- but
+        # here no cycle is running and no steam is the honest picture.
+        await pg.goto("http://localhost:8000/?nosteam", wait_until="load")
         await pg.wait_for_timeout(2500)
         await _inject_key_overlay(pg)
 

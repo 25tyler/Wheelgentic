@@ -961,6 +961,15 @@ function stepCare(dt) {
   careEl.classList.add('on');
 }
 
+// Whether the shower beat warms the room with no cycle running. See the note
+// in stepArms. Off for the backup recorder, which loads the bare URL with
+// ?nosteam so its no-cycle story stays an honest one; on everywhere else,
+// because a shower with no steam reads as a machine rubbing a mannequin.
+const STEAM_WHEN_IDLE = (() => {
+  try { return !new URLSearchParams(location.search).has('nosteam'); }
+  catch (_) { return true; }   // a malformed URL is not a reason to be cold
+})();
+
 function stepArms(dt) {
   stepPrivacy();
   stepCare(dt);
@@ -979,7 +988,22 @@ function stepArms(dt) {
   //
   // Tied to the same fraction the counter and the foam use, so the room
   // warming up and the person getting clean are one number, not two.
-  const washing = mode === 'shower' && (cycleLive || choreoInterval !== null);
+  //
+  // THE THIRD CASE: NO BACKEND AT ALL. Both flags above need Python -- a
+  // websocket on 8765 to set cycleLive, or the 's' key to start the
+  // choreography -- so opening the shower beat on the product page, or on any
+  // machine without the stack running, gave a cold room. The steam is most of
+  // what makes that beat read as a warm wash rather than a rubbed mannequin,
+  // and it was missing exactly where somebody is most likely to look.
+  //
+  // STEAM_WHEN_IDLE is opt-in and off by default, which is what keeps the
+  // warning above true: record_backup.py loads the bare URL and never sets
+  // it, so the fallback clip still has no steam over a story where no cycle
+  // is running. Nothing else about the beat changes -- no arms move, no
+  // splotch pops, no counter climbs. It is the room being warm.
+  const washing = mode === 'shower'
+                  && (cycleLive || choreoInterval !== null
+                      || (STEAM_WHEN_IDLE && !washStopped));
   const done = recs.length ? cleaned / recs.length : 0;
   stepSteam(dt, washing ? 0.30 + done * 0.45 : 0);
   // BEFORE arm.update, so the reach point this frame is the one the solve
@@ -1127,7 +1151,10 @@ let feedTrip = null;
 const MODES = {
   shower: { label: 'CLEANLINESS', unit: '%',
             // the existing cycle; arms work the body
-            enter: () => { fleetPhase('rest'); } },
+            // ENTERING THE BEAT CLEARS THE STOP. Coming back to the shower
+            // is the operator starting it again, which is also how the estop
+            // is recovered from -- shift+C then the mode key.
+            enter: () => { washStopped = false; fleetPhase('rest'); } },
   feed:   { label: 'MEAL RUN',    unit: '%',
             // ONE arm lifts to mouth height and holds. Four arms converging
             // on someone's face reads as an attack; one arm offering food
@@ -2991,6 +3018,16 @@ let sock = null;                 // set by connect(), used by the 's' key
 let cycleLive = false;           // a Python scrub cycle is running RIGHT NOW
 let scrubPhase = 1;              // flips per contact -> a back-and-forth stroke
 let emoteIdx = -1;               // 'e' cycles the reaction clips
+// TRUE WHENEVER THE WASH IS NOT RUNNING: before anybody has started the demo,
+// and again once something stops it. It starts TRUE because the page boots
+// into shower mode behind the start gate, and a page nobody has begun should
+// not be steaming at a room.
+//
+// The idle steam below is the room being warm for a shower, and after an
+// emergency stop the honest picture is a room that is not running one: a
+// machine that halts and leaves the shower steaming reads as still going, on
+// the one beat whose whole job is showing it stopped.
+let washStopped = true;
 let choreoTimers = [];
 let choreoInterval = null;      // module scope so the ESTOP can reach it
 
@@ -3006,6 +3043,9 @@ let choreoInterval = null;      // module scope so the ESTOP can reach it
  *  cannot tell "confirmed but still animating" from a real runaway.
  */
 function stopScrubChoreography() {
+  // AND THE ROOM GOES COLD. stepSteam eases rather than cuts, so this reads as
+  // the shower being shut off rather than a layer being deleted.
+  washStopped = true;
   choreoTimers.forEach(clearTimeout);
   choreoTimers = [];
   if (choreoInterval !== null) { clearInterval(choreoInterval); choreoInterval = null; }
@@ -3755,6 +3795,10 @@ function openGate() {
   if (!gate) return false;
   unlockAudio();                                // MUST be inside a gesture
   gate.remove();
+  // THE DEMO HAS BEGUN, so the shower beat may warm its room. Before this the
+  // page sits behind the gate in shower mode, and steam there would be a room
+  // running for nobody.
+  washStopped = false;
   startPose();
   return true;
 }
@@ -4932,6 +4976,10 @@ function applyTaskView() {
   // in her page does not unlock this one: the first pointerdown or key here
   // does it, through the same openGate path the projector uses.
   document.getElementById('gate')?.remove();
+  // AND THE ROOM MAY WARM UP. The gate is what normally clears this, and it
+  // is being removed rather than pressed here -- without this a Showering
+  // task opened from her UI would run the beat in a cold room.
+  washStopped = false;
   const v = VIEWS[key.toLowerCase()];
   if (!v) {
     // AN UNKNOWN VIEW IS THE PROJECTOR VIEW, not an error page. She may ship a

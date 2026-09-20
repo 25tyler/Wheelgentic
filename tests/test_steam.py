@@ -63,14 +63,25 @@ async def main():
         pg.on("pageerror", lambda e: errs.append(str(e)[:120]))
         await pg.goto("http://localhost:8000/", wait_until="load")
         await pg.wait_for_timeout(5000)
-        await pg.keyboard.press(" ")
-        await pg.wait_for_timeout(700)
 
-        print("\n=== 1. NOTHING BEFORE THE WASH ===")
+        print("\n=== 1. NOTHING BEFORE THE DEMO STARTS ===")
+        # READ IT BEFORE THE GATE IS PRESSED. The shower beat warms its room
+        # whether or not Python is running -- a shower with no steam reads as
+        # a machine rubbing a mannequin, and both of the flags that used to
+        # gate it need a websocket and a backend the product page does not
+        # have. So "nothing is happening" is no longer the moment after the
+        # gate; it is the moment before, when the page is sitting in shower
+        # mode behind PRESS ANY KEY and nobody has begun.
         idle = await pg.evaluate(STEAM)
         check("the steam exists in the scene", idle is not None, idle)
-        check("and is invisible while nothing is happening",
+        check("and is invisible before anybody starts the demo",
               idle and idle["op"] < 0.01, idle and idle["op"])
+        await pg.keyboard.press(" ")
+        await pg.wait_for_timeout(700)
+        # And it warms up once they do, with no cycle armed and no Python.
+        warm = await pg.evaluate(STEAM)
+        check("and the room warms up once the demo begins",
+              warm["op"] > 0.05, warm["op"])
 
         print("\n=== 2. IT RISES DURING THE WASH ===")
         # The real spine, not a flag poke.
