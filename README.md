@@ -1,13 +1,13 @@
 # carechair voice + care dashboard
 
-A light-blue care dashboard with a small Node.js voice pipeline. Plain browser JavaScript, Node built-ins, no npm dependencies, no robot movement implementation.
+A light-blue care dashboard with a small Node.js voice pipeline. Plain browser JavaScript, Node.js with SerialPort for USB sensors, and no robot movement implementation. See [HARDWARE.md](HARDWARE.md) for the confirmed UNO Q, Modulino modules, firmware, and wiring tests.
 
 ## Run
 
 Requires Node.js 22 or later.
 
 1. Copy `.env.example` to `.env` and set `DEEPGRAM_API_KEY`, `META_API_KEY`, and optionally `TOKEN_COMPANY_API_KEY`.
-2. Run `npm run dev` and open http://127.0.0.1:5173.
+2. Run `npm install`, then `npm run dev` and open http://127.0.0.1:5173.
 3. Use the inline **Talk to carechair** panel on Overview. Click **Start microphone**, speak, then **Stop microphone**. Recording automatically finishes after 20 seconds. You can also type a message.
 4. Replies play aloud automatically through Deepgram Aura-2. Use **Voice replies on/off** to mute automatic playback or **Listen again** to replay. If the browser blocks autoplay, click **Listen again**. Starting a new recording or leaving Overview stops speech.
 5. Run `npm test` for mocked integration and error-path tests; `npm run check` for syntax checks.
@@ -50,12 +50,13 @@ Simple stop/pause phrases bypass Meta and compression, even if those providers a
 | `POST /api/command` | `{transcript, history:[{role,content}]}` | Interprets, validates, dispatches through adapter, returns transcript/command/understanding/suggestion/response/delivery/compression |
 | `POST /api/task` | `{command: <validated intent object>}` | Explicit task adapter boundary |
 | `POST /api/stop` | `{action:"stop"}` or `{action:"pause"}` | Bypasses AI; forwards control through adapter |
-| `GET /api/vitals` | None | Demo returns disconnected/null; live adapter can proxy teammate readings |
+| `GET /api/vitals` | None | Live USB room temperature/humidity, freshness, and button status |
+| `GET /api/hardware/events` | None | Server-sent sensor snapshots and new button presses |
 | `GET /api/voice/status` | None | Boolean credential presence and robot mode only; not a provider health check |
 
 Default `ROBOT_MODE=demo` prepares payloads and returns `delivery.status="simulated"`. No robot endpoint is contacted. To connect later, explicitly set `ROBOT_MODE=live`, `ROBOT_BACKEND_URL=http://127.0.0.1:8000`, and optional `ROBOT_API_KEY`.
 
-The adapter sends the following payload to the teammate's `POST /api/task` or `POST /api/stop`:
+Robot task/stop delivery remains independent of USB sensor readings. The adapter sends the following payload to the teammate's `POST /api/task` or `POST /api/stop`:
 
 ```json
 {
@@ -88,7 +89,7 @@ Meta uses the current Model API at `META_API_URL` (default `https://api.meta.ai/
 - `robot-adapter.js`: demo/live task, stop and vitals boundary
 - `voice-config.js`: environment configuration
 - `server.js`: local HTTP routes and static allowlist
-- `voice.test.js`, `voice-client.test.js`, and `voice-speech.test.js`: 23 API, microphone, suggestion and playback tests with no credentials or external network required
+- `voice.test.js`, `voice-client.test.js`, and `voice-speech.test.js`: API, microphone, suggestion and playback tests with no credentials or external network required
 
 ## Verification on this machine
 
@@ -104,7 +105,7 @@ Provider references: [Deepgram prerecorded audio](https://developers.deepgram.co
 
 ## Care interface
 
-The inline voice panel keeps provider configuration, structured JSON, compression details, and delivery mode out of the user interface. The API still returns those fields for integration. Prepared task replies say the request is ready, without claiming movement or completion. Vitals show an empty state until readings are available. Shower check-ins record an already completed shower, like the meal tracker; older synthetic bathing records are excluded from the displayed journal, counts, and report. Original stored records are preserved.
+The inline voice panel keeps provider configuration, structured JSON, compression details, and delivery mode out of the user interface. The API still returns those fields for integration. Prepared task replies say the request is ready, without claiming movement or completion. The Overview has a Vitals & comfort section showing actual Modulino Thermo room temperature and humidity; it shows an empty state when readings are unavailable. Shower check-ins record an already completed shower, like the meal tracker; older synthetic bathing records are excluded from the displayed journal, counts, and report. Original stored records are preserved.
 
 ## Conversation and spoken replies
 
@@ -113,3 +114,7 @@ Meta returns a brief `understanding` summary and an optional `suggestion` (`eati
 Spoken replies use the same final text shown on screen. Set optional `DEEPGRAM_TTS_MODEL` (default `aura-2-thalia-en`) to change the voice. Synthesis happens server-side with the existing `DEEPGRAM_API_KEY`; MP3 audio is kept in memory, responses use `no-store`, and browser object URLs are revoked after playback. Speech failures leave the text reply available. Autoplay is best-effort; blocked playback offers a user-initiated retry.
 
 Text-to-speech reference: [Deepgram Aura REST API](https://developers.deepgram.com/docs/text-to-speech).
+
+## Arduino and live room conditions
+
+See [HARDWARE.md](HARDWARE.md) for firmware upload, USB testing, A/B/C button checks, and the USB-versus-Wi-Fi plan. `hardware-state.js`, `hardware-serial.js`, `hardware-cli.js`, and `vitals-client.js` implement the laptop link. `hardware.test.js` and `vitals-client.test.js` cover freshness, invalid readings, repeated button presses, disconnects, HTTP/SSE, and foreground microphone control. Firmware lives at `arduino/carechair_sensors/carechair_sensors.ino`.

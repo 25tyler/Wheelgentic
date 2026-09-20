@@ -55,6 +55,14 @@ class FakeRecorder {
   }
 }
 
+test('hardware microphone toggle uses the same recording and transcription path as the screen button',async t=>{
+  const {node,requests,controller}=harness(t,async()=>({getTracks:()=>[{stop(){}}]}),FakeRecorder);
+  await controller.toggleMicrophone();assert.equal(node('#record-label').textContent,'Stop microphone');
+  await controller.toggleMicrophone();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(requests.filter(r=>r.url==='/api/transcribe').length,1);
+  controller.dispose();await controller.toggleMicrophone();assert.equal(requests.filter(r=>r.url==='/api/transcribe').length,1);
+});
+
 test('microphone denial shows an error and re-enables the button', async t => {
   const { node } = harness(t, async () => { throw new DOMException('denied', 'NotAllowedError'); }, FakeRecorder);
   await node('#record-voice').onclick();

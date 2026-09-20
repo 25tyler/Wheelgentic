@@ -164,7 +164,7 @@ test('HTTP blocks secret files, foreign origins, unsupported audio, malformed JS
   assert.equal((await fetch(base + '/api/command', post({ transcript: ' ' }))).status, 400);
   assert.equal((await fetch(base + '/api/stop', post({ action: 'drive' }))).status, 400);
   assert.equal((await fetch(base + '/api/task', post({ command: { ...command(), motor: 100 } }))).status, 502);
-  assert.equal((await (await fetch(base + '/api/vitals')).json()).readings, null);
+  assert.equal((await (await fetch(base + '/api/vitals')).json()).temperature.celsius, null);
   const status = await (await fetch(base + '/api/voice/status')).json();
   assert.equal(status.meta, true);
   assert.ok(!JSON.stringify(status).includes('test-meta'));

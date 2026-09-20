@@ -142,6 +142,7 @@ export function mountVoice(root) {
     else void speaker.speak(lastReply);
   };
   $('#record-voice').onclick = async () => {
+    if (closed) return;
     if (recorder?.state === 'recording') { setBusy(true); recorder.stop(); releaseMic(); return; }
     if (busy || permissionPending) return;
     speaker.stop();
@@ -182,5 +183,5 @@ export function mountVoice(root) {
   }
   function cleanup() { if (closed) return; suspend(); speaker.dispose(); closed=true; }
   dispose=cleanup;
-  return { suspend, dispose:cleanup, focus(){ $('#record-voice').focus({preventScroll:true}); } };
+  return { suspend, dispose:cleanup, toggleMicrophone(){ return $('#record-voice').onclick(); }, focus(){ $('#record-voice').focus({preventScroll:true}); } };
 }

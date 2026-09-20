@@ -5,6 +5,8 @@ import { AppError, getConfig, loadEnvironment } from './voice-config.js';
 import { createProviders } from './voice-providers.js';
 import { createRobotAdapter } from './robot-adapter.js';
 import { createVoiceService } from './voice-service.js';
+import { createHardwareState } from './hardware-state.js';
+import { createSerialHardware } from './hardware-serial.js';
 
 // Never serve .env, server modules, tests, or .git.
 const assets = new Map([
@@ -12,6 +14,7 @@ const assets = new Map([
   ['/style.css', ['style.css', 'text/css']], ['/app.js', ['app.js', 'text/javascript']],
   ['/voice-client.js', ['voice-client.js', 'text/javascript']],
   ['/voice-speech.js', ['voice-speech.js', 'text/javascript']],
+  ['/vitals-client.js', ['vitals-client.js', 'text/javascript']],
 ]);
 const audioTypes = new Set(['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/wav', 'audio/x-wav']);
 async function readBody(req, maxBytes) {
@@ -36,6 +39,8 @@ export function createApp(config = getConfig(), dependencies = {}) {
   const providers = dependencies.providers || createProviders(config);
   const robot = dependencies.robot || createRobotAdapter(config);
   const voice = createVoiceService(providers, robot);
+  const hardware = dependencies.hardware || createHardwareState();
+  const streams = new Set();
   const server = http.createServer(async (req, res) => {
     try {
       const host = req.headers.host || '';
@@ -68,7 +73,23 @@ export function createApp(config = getConfig(), dependencies = {}) {
         const body = await jsonBody(req);
         return json(res, 200, { delivery: await voice.task(body?.command) });
       }
-      if (req.method === 'GET' && url.pathname === '/api/vitals') return json(res, 200, await robot.vitals());
+      if (req.method === 'GET' && url.pathname === '/api/vitals') return json(res, 200, hardware.snapshot());
+      if (req.method === 'GET' && url.pathname === '/api/hardware/events') {
+        if (streams.size >= 8) throw new AppError('Too many open sensor views.', 429);
+        res.writeHead(200, { 'Content-Type':'text/event-stream', 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff' });
+        streams.add(res);
+        const send = (event, value) => {
+          if (!res.destroyed && !res.write(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`)) res.destroy();
+        };
+        const snapshot = value => send('snapshot', value);
+        // Send a press to one visible app connection only; never replay historical presses.
+        const button = value => { if ([...streams].at(-1) === res) send('button', value); };
+        hardware.events.on('snapshot', snapshot); hardware.events.on('button', button);
+        snapshot(hardware.snapshot());
+        const heartbeat = setInterval(()=>snapshot(hardware.snapshot()),1000);
+        res.on('close',()=>{clearInterval(heartbeat);streams.delete(res);hardware.events.off('snapshot',snapshot);hardware.events.off('button',button);});
+        return;
+      }
       if (req.method !== 'GET' || !assets.has(url.pathname)) throw new AppError('Not found.', 404);
       const [file, type] = assets.get(url.pathname);
       const data = await readFile(new URL(file, import.meta.url));
@@ -82,9 +103,14 @@ export function createApp(config = getConfig(), dependencies = {}) {
     }
   });
   server.requestTimeout = 30000;
+  server.on('close',()=>{for(const stream of streams)stream.destroy();});
   return server;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   loadEnvironment(); const config = getConfig();
-  createApp(config).listen(config.port, '127.0.0.1', () => console.log(`carechair: http://127.0.0.1:${config.port} (robot: ${config.robotMode})`));
+  const hardware = createSerialHardware({path:process.env.ARDUINO_PORT || ''});
+  const server = createApp(config, {hardware});
+  server.listen(config.port, '127.0.0.1', () => { hardware.start(); console.log(`carechair: http://127.0.0.1:${config.port}`); });
+  async function shutdown() { await hardware.stop(); server.close(); server.closeAllConnections(); }
+  process.once('SIGINT',shutdown); process.once('SIGTERM',shutdown);
 }

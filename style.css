@@ -78,3 +78,15 @@
 
 /* Keep the brand lowercase even in uppercase labels. */
 .brand-name{text-transform:none}
+
+/* Live room conditions */
+.temperature-panel{background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.temperature-top{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:22px 25px;border-bottom:1px solid #edf3f7}
+.temperature-label{font-size:10px;color:#8399aa}.temperature-top h3{font:700 17px Manrope,sans-serif;margin:5px 0 0;letter-spacing:-.4px}
+.sensor-status{font-size:10px;padding:8px 12px;border-radius:20px;background:#f1f5f8;color:#8294a2;white-space:nowrap}.sensor-status.live{background:#eaf6f0;color:#518a73}.sensor-status.live:before{content:'●';font-size:8px;margin-right:7px}
+.temperature-body{display:grid;grid-template-columns:1fr 1.35fr;gap:28px;padding:26px}
+.temperature-reading{padding:0 10px}#temperature-value{font:700 54px Manrope,sans-serif;letter-spacing:-3px;color:#386b90}.temperature-unit{font-size:24px;color:#90aec4;margin-left:8px}.temperature-reading p{font-size:12px;color:#7992a5;margin:8px 0}.temperature-reading small{font-size:10px;color:#97a8b5}.temperature-divider{margin:0 8px}
+.temperature-explanation{display:flex;gap:14px;align-items:flex-start;background:#f0f7fc;border-radius:12px;padding:22px}.temperature-icon{font-size:25px;color:#80aac6}.temperature-explanation h4{font:700 13px Manrope,sans-serif;margin:3px 0 10px}.temperature-explanation p{font-size:12px;line-height:1.8;color:#718d9f;margin:0}
+.temperature-bottom{display:flex;align-items:center;justify-content:space-between;gap:22px;padding:0 26px 20px;color:#8a9daa;font-size:10px;line-height:1.8}.temperature-bottom p{max-width:420px;margin:0}.temperature-bottom>span{white-space:nowrap;color:#5f8ba9}
+.sensor-details{border-top:1px solid #edf3f7;padding:13px 26px;font-size:11px;color:#7891a4}.sensor-details summary{cursor:pointer}.sensor-details p{font-size:11px;line-height:1.8}.physical-buttons{display:flex;gap:10px;margin:14px 0 5px;flex-wrap:wrap}.physical-buttons span{padding:9px 13px;border:1px solid #deebf4;border-radius:7px;background:#f8fbfd}.physical-buttons .pressed{background:#d9ecfa;border-color:#79b1d7;color:#245c87}
+@media(max-width:650px){.temperature-body{grid-template-columns:1fr;gap:20px;padding:20px}.temperature-top{padding:20px;align-items:flex-start}.temperature-bottom{flex-direction:column;align-items:flex-start;gap:12px;padding:0 20px 20px}.sensor-details{padding:14px 20px}#temperature-value{font-size:48px}}

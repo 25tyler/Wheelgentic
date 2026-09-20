@@ -1,4 +1,5 @@
 import { mountVoice, disposeVoice } from './voice-client.js';
+import { mountVitals } from './vitals-client.js';
 let voiceController;
 const $=s=>document.querySelector(s);
 const day=()=>new Date().toLocaleDateString('en-CA');
@@ -15,13 +16,12 @@ function bathCount(){return Math.max(0,state.baths-state.events.filter(e=>e.desc
 function activity(){const events=careEvents();return events.length?events.map(e=>`<div class="activity-row"><span class="activity-icon">${escape(e.icon)}</span><div><strong>${escape(e.title)}</strong><small>${escape(e.description)}</small></div><time>${new Date(e.time).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</time></div>`).join(''):'<div class="empty-state">A fresh start for today.<br>Your meals, care moments, and check-ins will appear here as you log them.</div>';}
 function meds(){return ['Morning','Evening'].map((m,i)=>`<div class="med-row"><span class="med-symbol">⊕</span><div><strong>${m} medication</strong><small>Log after taking</small></div><button class="med-check" data-med="${i}" ${state.meds.includes(i)?'disabled':''}>${state.meds.includes(i)?'✓ Logged':'Log taken'}</button></div>`).join('');}
 function render(){ensureDay();$('#today').textContent=new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'}).toUpperCase();$('#stats').innerHTML=[['Meals enjoyed',state.meals,'meals','♧','Logged today',3],['Water breaks',state.water,'glasses','♒','Logged today · 250 ml each',8],['Personal care',bathCount(),'sessions','♡','Completed today',1],['Medications',state.meds.length,'/ 2 logged','⊕','Logged today',2]].map(([label,n,unit,icon,note,total])=>`<div class="stat"><div class="stat-header">${label}<span class="stat-icon">${icon}</span></div><div class="stat-number">${n}<small>${unit}</small></div><div class="stat-bottom"><span>${note}</span><div class="bar"><i style="width:${Math.min(n/total*100,100)}%"></i></div></div></div>`).join('');$('#activity-list').innerHTML=activity();$('#med-list').innerHTML=meds();document.querySelectorAll('[data-mood]').forEach(b=>{b.classList.toggle('selected',state.mood===b.dataset.mood);b.setAttribute('aria-pressed',state.mood===b.dataset.mood);});$('#mood-message').textContent=state.mood?`You checked in as ${state.mood.toLowerCase()}. Thanks for sharing.`:'Every feeling is welcome here.';if(view!=='overview')renderDetail();}
-const pages={overview:['Overview','Your day, your way.','A little support for the things that matter. Let’s make today a good one.'],medications:['Medications','A little help with your routine.','Track what you have taken, following your own prescribed care plan.'],vitals:['Vitals & wellbeing','A window into your wellbeing.','Your health readings, in one place.'],activity:['Activity journal','Your day, thoughtfully recorded.','All of today’s care moments, in one place.'],team:['Care circle','Keep your people close.','Prepare a daily update for the people who support you.']};
+const pages={overview:['Overview','Your day, your way.','A little support for the things that matter. Let’s make today a good one.'],medications:['Medications','A little help with your routine.','Track what you have taken, following your own prescribed care plan.'],activity:['Activity journal','Your day, thoughtfully recorded.','All of today’s care moments, in one place.'],team:['Care circle','Keep your people close.','Prepare a daily update for the people who support you.']};
 function navigate(next){if(next!=='overview')voiceController?.suspend();view=next;const [label,title,sub]=pages[next];$('#page-label').textContent=label;$('#heading').textContent=title;$('#subheading').textContent=sub;$('#overview').hidden=next!=='overview';$('#detail-view').hidden=next==='overview';document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.view===next));renderDetail();}
 function renderDetail(){
   let html='';
   if(view==='medications')html=`<div class="section-card"><h2>Your daily check-ins</h2>${meds()}</div>`;
   if(view==='activity')html=`<div class="section-card"><h2>Today’s journal</h2>${activity()}</div>`;
-  if(view==='vitals')html=`<div class="detail-grid">${[['Heart rate','bpm'],['Blood oxygen','%'],['Temperature','°C']].map(([label,unit])=>`<div class="section-card"><h2>${label}</h2><div class="vital-number">— <small>${unit}</small></div><p class="vital-empty">No readings yet</p></div>`).join('')}</div>`;
   if(view==='team')html='<div class="section-card"><h2>Your care circle</h2><p class="empty-state">Share your daily care report with your caretaker, nursing home, or family.</p><button class="primary" data-action="report">Prepare care report ↗</button></div>';
   $('#detail-view').innerHTML=html;
 }
@@ -37,4 +37,9 @@ $('#close-modal').onclick=close;
 document.addEventListener('click',e=>{if(e.target.id==='download-report'){const url=URL.createObjectURL(new Blob([report()],{type:'text/plain'}));const a=document.createElement('a');a.href=url;a.download=`carechair-care-${day()}.txt`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Report downloaded.');}if(e.target.id==='email-report'){const input=$('#caretaker-email');if(!input.value||!input.checkValidity()){input.reportValidity();input.focus();toast('Enter a valid recipient email.');return;}location.href=`mailto:${encodeURIComponent(input.value)}?subject=${encodeURIComponent('carechair daily care update')}&body=${encodeURIComponent(report())}`;toast('Email draft requested. Send it from your email app.');}});
 render();
 voiceController=mountVoice($('#voice-panel'));
-window.addEventListener('pagehide',disposeVoice);
+const vitalsController=mountVitals($('#vitals-panel'),()=>{
+  if($('#modal').open){toast('Close the care form to use the microphone.');return;}
+  if(view!=='overview')navigate('overview');
+  void voiceController.toggleMicrophone();
+});
+window.addEventListener('pagehide',()=>{disposeVoice();vitalsController.dispose();});
