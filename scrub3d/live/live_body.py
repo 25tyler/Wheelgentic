@@ -1903,6 +1903,42 @@ def diag(live, depth, live_mesh, n, folder):
         overlay(live, parts, os.path.join(folder, f"over_{n:05d}.jpg"))
 
 
+# Where the measurements land for anything outside this process. /tmp so it
+# never pollutes the repo and never survives a reboot: a stale body from a
+# different person is worse than no body at all.
+SHARE_PATH = os.environ.get("SCRUB3D_DIMS", "/tmp/wheelgentic-dims.json")
+
+
+def _share_dims(D, seat, sitting_height):
+    """Write the measured dimensions where another process can read them.
+
+    ATOMIC, because a reader polling this will otherwise catch a half-written
+    file and get a body with three limbs. Write beside it and rename, which
+    is atomic on the same filesystem.
+
+    NEVER RAISES. This rides the loop that drives the arms; a full disk must
+    cost a stale file, not a run.
+    """
+    try:
+        out = {"t": time.time(),
+               "seat_mm": None if seat is None else
+                          [round(float(v), 1) for v in
+                           (list(seat.get("xy", [0, 0])) + [seat.get("z", 0.0)])],
+               "sitting_height_mm": None if sitting_height is None
+                                    else round(float(sitting_height), 1),
+               # Each dimension with the SAMPLE COUNT behind it, because a
+               # value blended mostly from the typical-adult prior is not a
+               # measurement and a reader has to be able to tell.
+               "mm": {k: round(float(m.value()), 1) for k, m in D.items()},
+               "n": {k: int(m.n) for k, m in D.items()}}
+        tmp = SHARE_PATH + ".part"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(out, fh)
+        os.replace(tmp, SHARE_PATH)
+    except Exception:                                        # noqa: BLE001
+        pass
+
+
 def overlay(live, parts, path):
     """The model drawn over the camera image, with MediaPipe's joints."""
     intr, T = live.intr, live.T_wc
@@ -2326,6 +2362,19 @@ def main():
                     last_print = now
                     print(f"  {n} frames, {fps:.1f}/s; " + ", ".join(
                         f"{k} {m.value():.0f}({m.n})" for k, m in D.items()), flush=True)
+                # SHARE THE MEASUREMENTS. This loop measures thirteen body
+                # dimensions off the silhouette and the depth, and until now
+                # they existed only in this process and its viewer. The
+                # projector measured three of them again, worse, from six
+                # joint positions -- a second implementation of the same
+                # question, which is the thing this project keeps paying for.
+                #
+                # Written to a file rather than a socket because this loop
+                # must not gain a network dependency: it drives real arms,
+                # and a reader that blocks or a port that is taken cannot be
+                # allowed to matter here. A reader either finds the file or
+                # does not.
+                _share_dims(D, live.seat, body.sitting_height)
     finally:
         if hw is not None:
             missed = hw.close()

@@ -270,12 +270,87 @@ def _measure_body(world_mm, measured_names):
         return
 
 
+# The file scrub3d/live/live_body.py writes its measurements to, when it is
+# running. Same default as its SHARE_PATH.
+_DIMS_PATH = os.environ.get("SCRUB3D_DIMS", "/tmp/wheelgentic-dims.json")
+
+# A shared body older than this is not this person. The file survives the
+# process that wrote it, so without an age check a body measured an hour ago
+# would be drawn as the one in the chair now.
+_DIMS_STALE_S = 10.0
+
+# live_body's dimension names -> the ones anatomy.anatomical_body() takes.
+# Lengths pass through; the widths it measures have to become circumferences,
+# which scene_out already knows how to do.
+_LB_LEN = {"shoulders": "biacromial_mm", "upper_arm_len": "upper_arm_len_mm",
+           "forearm_len": "forearm_len_mm", "torso_len": "torso_len_mm"}
+_LB_CIRC = {"upper_arm_w": "upper_arm_circ_mm", "forearm_w": "forearm_circ_mm",
+            "wrist_w": "wrist_circ_mm", "chest_w": "chest_circ_mm",
+            "waist_w": "waist_circ_mm"}
+
+
+def _shared_body():
+    """live_body.py's own measurements, if it is running. -> dict or None.
+
+    HIS NUMBERS BEAT OURS AND IT IS NOT CLOSE. This process measures three
+    dimensions from six joint positions. live_body measures THIRTEEN off the
+    silhouette and the depth -- chest, waist, hips, head, thigh, hand, and
+    every limb width -- because it has the person's outline and we have
+    points. On the same recording the two agree where they overlap
+    (shoulders 341 against 340, forearm 234 against 235), so this is not a
+    disagreement to resolve; it is nine dimensions we simply do not have.
+
+    Reading a file he already writes is also the only version of this that
+    does not put a second measurement of the same body in the same product.
+    """
+    try:
+        st = os.stat(_DIMS_PATH)
+        if time.time() - st.st_mtime > _DIMS_STALE_S:
+            return None                      # his view stopped; not this person
+        with open(_DIMS_PATH, encoding="utf-8") as fh:
+            d = json.load(fh)
+    except Exception:                                        # noqa: BLE001
+        return None
+    mm, n = d.get("mm") or {}, d.get("n") or {}
+    if not mm:
+        return None
+    try:
+        from scene_out import body_measurements
+        import live_body as _lb
+
+        # Rebuild his accumulators' SHAPE so the existing converter can read
+        # them: it wants objects with .value() and .n, and that is exactly
+        # what his file carries as two flat dicts.
+        class _M:
+            def __init__(self, v, k): self._v, self.n = v, k
+            def value(self): return self._v
+
+        D = {k: _M(float(v), int(n.get(k, 0))) for k, v in mm.items()}
+        b = body_measurements(
+            D, circ_of=_lb.circ_of, limb_p=_lb.LIMB_P, torso_p=_lb.TORSO_P,
+            limb_flatten=_lb.AN.ADULT["limb_flatten"],
+            torso_flatten=_lb.AN.ADULT["torso_flatten"])
+        if b.get("src") != "depth":
+            return None
+        b["from"] = "live_body"
+        return b
+    except Exception:                                        # noqa: BLE001
+        return None
+
+
 def _sample_body():
     """The measured body for the wire. -> dict or None.
 
     None means nothing has been measured, and the page keeps its baked
     default rather than being handed a prior dressed as a measurement.
     """
+    # HIS FIRST, ALWAYS. See _shared_body: thirteen dimensions off the
+    # silhouette against our three off joint positions, agreeing where they
+    # overlap. Ours is the fallback for a run with no live_body, not a
+    # competitor.
+    shared = _shared_body()
+    if shared is not None:
+        return shared
     if _BODY_DIMS is None or _BODY_LB is None:
         return None
     try:
