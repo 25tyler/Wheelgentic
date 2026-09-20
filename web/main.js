@@ -669,6 +669,34 @@ function limbsToLandmarks(mm) {
     // and looked consistent.
     out[i] = { x: sy / 1000, y: -sz / 1000, z: sx / 1000 };
   }
+  // HIPS, DERIVED FROM THE SHOULDERS RATHER THAN SENT.
+  //
+  // avatar.js reads them before it aims anything: its orientation assert
+  // compares shoulder height against hip height, and V() on an undefined
+  // landmark throws, which aborted the whole tracked-pose block every frame
+  // and left the character in its idle clip while six measured joints sat
+  // in the array unused.
+  //
+  // But the hips ON THE WIRE cannot be used for it. Depth never reaches a
+  // seated person's hips -- the seat is in the way -- so they fall back to
+  // vision.py's seated-adult constant of 1050mm while the shoulders are
+  // MEASURED at about 270mm. In one skeleton that puts the hips three
+  // quarters of a metre ABOVE the shoulders, and the assert fired exactly
+  // as it was written to: "AVATAR UPSIDE DOWN: shoulderY=0.000 <=
+  // hipY=2.340."
+  //
+  // So they are placed a torso below the shoulder line instead. Nothing
+  // reads them for a position -- only for "which way is up" -- and a
+  // derived point that answers that correctly beats a measured-looking one
+  // that answers it backwards. 0.45 is a seated adult's shoulder-to-hip in
+  // the metres-scale MediaPipe frame, from anatomy.ADULT's torso_len.
+  const sh = out[IDX.l_shoulder] || out[IDX.r_shoulder];
+  if (sh) {
+    const hipY = sh.y + 0.45;            // +y is DOWN in this frame
+    out[23] = { x:  0.09, y: hipY, z: sh.z };
+    out[24] = { x: -0.09, y: hipY, z: sh.z };
+  }
+
   // avatar.update() indexes up to LM.R_HIP (24) before it will pose
   // anything, so the array has to be that long even though the hips are not
   // published. The holes are undefined, and aim() already skips a joint it
@@ -3225,7 +3253,23 @@ function startScrubChoreography() {
       // says "mixed" or "pose_2d_lifted" we leave the webcam alone, because
       // a half-measured skeleton is not an improvement on a whole estimated
       // one.
-      limbsWorld = (src === 'depth_measured') ? m.limbs.mm : null;
+      // GATE ON THE JOINTS THE POSE USES, NOT ON THE WHOLE PAYLOAD. `src`
+      // is "depth_measured" only when EVERY joint in the message was
+      // measured, and the message grew hips for the chair -- which depth
+      // cannot reach on a seated person, because the seat is in the way. So
+      // src became "mixed" on every frame, this line refused every frame,
+      // and the character sat in its idle T-pose while all six arm joints
+      // were measured perfectly.
+      //
+      // The six the arms are posed from are the ones that have to be
+      // measured. A hip that is still an estimate cannot move an arm.
+      const names = Array.isArray(m.limbs.measured_names)
+        ? new Set(m.limbs.measured_names) : null;
+      const POSE_JOINTS = ['l_shoulder', 'l_elbow', 'l_wrist',
+                           'r_shoulder', 'r_elbow', 'r_wrist'];
+      const posable = src === 'depth_measured'
+        || (names && POSE_JOINTS.every((k) => names.has(k)));
+      limbsWorld = posable ? m.limbs.mm : null;
     } else if (limbsSrc !== null) {
       limbsWorld = null;
       // Absent means the detector found nobody. Clear, for the same reason
@@ -4222,6 +4266,12 @@ window.__wheelgentic = { scene, camera, avatar, recs, renderer,
                      // the only way to tell a fresh partition from the bake.
                      get bodyFile() { return bodyFile(); },
                      get liveBody() { return liveBody; },
+                     // Whether the measured skeleton is reaching the
+                     // character, and what it says. A screenshot cannot
+                     // tell a posed arm from an idle one that happens to
+                     // be in a similar place.
+                     get limbsWorld() { return limbsWorld; },
+                     get limbsSrc() { return limbsSrc; },
                      // WHICH FRAMING THE CAMERA IS ON. A swap that quietly
                      // leaves the scan shot points the projector at the wrong
                      // half of the room on the exact beat the partition
