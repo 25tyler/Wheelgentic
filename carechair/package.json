@@ -1,0 +1,20 @@
+{
+  "name": "carechair",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js",
+    "check": "node --check app.js && node --check voice-client.js && node --check voice-speech.js && node --check server.js && node --check hardware-state.js && node --check hardware-serial.js && node --check vitals-client.js",
+    "test": "node --test voice.test.js voice-client.test.js voice-speech.test.js hardware.test.js vitals-client.test.js",
+    "hardware:list": "node hardware-cli.js",
+    "hardware:watch": "node hardware-cli.js --watch"
+  },
+  "dependencies": {
+    "serialport": "13.0.0"
+  }
+}
