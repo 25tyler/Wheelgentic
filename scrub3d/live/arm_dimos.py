@@ -88,6 +88,7 @@ TRACK_WINDOW_S = 0.5
 RETREAT_MM = 50.0
 BACK_OFF_S = 4.0
 STATE_HZ = 20.0
+OVER_Z_MM = 400.0           # above the base: the height an arm crosses its own blind spot at
 CLAWS_EVERY_S = 3.0         # the claws are told to stay shut this often
 AIM_LEAD_RAD = math.radians(20.0)   # how far ahead of the claw's angle a pose may ask
 WRIST_EASE_RAD = 1.15       # a wrist joint past this: stop asking the claw to turn
@@ -518,6 +519,23 @@ class DimosArm:
                 floor = getattr(K, "FLOOR_Z_MM", None)
                 if floor is not None and step[2] < floor + 1.0:
                     step = (step[0], step[1], floor + 1.0)
+                if K.ik(*step) is None:
+                    # Still not: the way THROUGH is shut, so go OVER. An arm
+                    # folded at the front whose work lies behind its own base
+                    # (a plank at the knees, the sitter's arms behind it) has
+                    # the base's blind spot on the straight line, and it stood
+                    # there for whole runs while its plan went on without it.
+                    # Straight up where it is to OVER_Z_MM, then level toward
+                    # the target at that height, which passes above its own
+                    # base and plank and nothing else; once the straight line
+                    # down to the target can be solved it is taken as before.
+                    if sent[2] < OVER_Z_MM - 1.0:
+                        step = (sent[0], sent[1], min(OVER_Z_MM, sent[2] + pace))
+                    else:
+                        gx, gy = tgt[0] - sent[0], tgt[1] - sent[1]
+                        g = math.hypot(gx, gy)
+                        kk = min(1.0, pace / g) if g > 1e-9 else 0.0
+                        step = (sent[0] + gx * kk, sent[1] + gy * kk, OVER_Z_MM)
                 if K.ik(*step) is None:
                     self.v_now = 0.0
                     continue                              # hold rather than guess
