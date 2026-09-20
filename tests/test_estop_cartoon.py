@@ -223,20 +223,40 @@ async def main():
         await pg.keyboard.press("Shift+KeyC")
         await pg.wait_for_timeout(1200)
         await pg.keyboard.press("8")          # feed: the arm reaches
-        read = ("()=>document.getElementById('pct').textContent")
-        # Long enough for at least one mouthful to land, so the number below
-        # is one the arm actually earned rather than the opening zero.
-        await pg.wait_for_timeout(15000)
-        before = await pg.evaluate(read)
-        check("the feed counter is running before the estop", True, before)
+        # WATCH THE ARM, NOT THE WORDS. The readout was the instrument here
+        # for a while, but with the counter gone it settles on one idle string
+        # -- so comparing it before and after would pass even if the estop did
+        # nothing at all. The claw's own position cannot be idle-identical
+        # through a trip, so that is what gets measured.
+        claw = ("()=>{const W=window.__wheelgentic;const a=W.fleet[1].arm;"
+                "const V=W.camera.position.constructor;const t=a.toolWorld(new V());"
+                "return [t.x,t.y,t.z];}")
+
+        async def spread(ms, step=400):
+            """How far the claw travels over `ms`. An arm on a trip sweeps
+            about a unit; a stopped one sits inside a few thousandths."""
+            pts = []
+            for _ in range(max(2, ms // step)):
+                pts.append(await pg.evaluate(claw))
+                await pg.wait_for_timeout(step)
+            far = 0.0
+            for i in range(len(pts)):
+                for j in range(i + 1, len(pts)):
+                    d = sum((pts[i][k] - pts[j][k]) ** 2 for k in range(3)) ** 0.5
+                    far = max(far, d)
+            return far
+
+        # Ask for a trip and prove the arm is genuinely travelling first,
+        # or the check below is asserting against something already still.
+        await pg.keyboard.press("8")
+        moving = await spread(5000)
+        check("the feeding arm is travelling before the estop",
+              moving > 0.20, f"claw moved {moving:.3f} over five seconds")
         await pg.keyboard.press("x")
-        # LONGER THAN A ROUND TRIP, so an arm that kept going has time to
-        # finish one and show it.
-        await pg.wait_for_timeout(15000)
-        after = await pg.evaluate(read)
-        check("and 'x' stops the count and keeps it stopped", after == before,
-              after if after == before
-              else f"COUNTED AFTER AN ESTOP: {before} -> {after}")
+        await pg.wait_for_timeout(2500)     # let the springs settle
+        stopped = await spread(6000)
+        check("and 'x' stops it and it stays stopped", stopped < 0.05,
+              f"claw moved {stopped:.3f} over six seconds after the stop")
 
         check("no page errors", not errs, str(errs))
         await b.close()

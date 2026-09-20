@@ -98,8 +98,10 @@ export function makeVitals(opts = {}) {
     last = now;
 
     // Advance the cardiac phase at the current rate. bpm/60 cycles a second.
-    phase = (phase + dt * (bpm / 60)) % 1;
-    samples[write] = amplitudeAt(phase);
+    // AT ZERO THE PHASE DOES NOT ADVANCE and the sample is flat: no sensor
+    // means no beat to draw, and a flat line is the one honest trace.
+    phase = bpm ? (phase + dt * (bpm / 60)) % 1 : 0;
+    samples[write] = bpm ? amplitudeAt(phase) : 0;
     write = (write + 1) % SAMPLES;
 
     ctx.clearRect(0, 0, W, H);
@@ -154,7 +156,19 @@ export function makeVitals(opts = {}) {
       raf = null;
     },
     /** Drive the rate from whatever the sensor (or the simulation) reports. */
-    setBpm(v) { bpm = Math.max(30, Math.min(200, v || 72)); },
+    /** The rate to draw, or 0 for NO READING.
+     *
+     *  Zero is a real state and not a missing argument. No pulse oximeter is
+     *  wired, so the vitals panel asks /api/vitals, gets
+     *  {"status":"disconnected"} and has nothing to draw -- and a monitor
+     *  that keeps drawing a 72bpm pulse in that state is claiming to read a
+     *  heart it cannot see. The `v || 72` fallback used to turn exactly that
+     *  case back into a healthy adult.
+     */
+    setBpm(v) {
+      if (!v) { bpm = 0; return; }
+      bpm = Math.max(30, Math.min(200, v));
+    },
     /** The cardiac phase, 0 to 1 per beat, so anything else that
      *  wants to pulse with the heart reads the SAME value the trace
      *  is drawn from rather than running a timer beside it. */

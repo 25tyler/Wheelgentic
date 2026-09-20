@@ -930,19 +930,27 @@ function stepPrivacy() {
 function stepCare(dt) {
   if (careEl === null) careEl = document.getElementById('care') || false;
   if (!careEl) return;
-  // WORKING, NOT MERELY ON. A live scrub cycle counts, and so do feeding and
-  // vitals -- the arms are moving or the chair is reading someone. Voice does
-  // NOT: the machine listening to a question is not care delivered, and
-  // counting it would inflate the one number here that has to be honest.
+  // WORKING, NOT MERELY ON, AND NOT MERELY SELECTED EITHER.
   //
-  // Shower with no cycle running is the resting state, so it does not count
-  // either; the cycle flag is what makes it real.
-  // WORKING, NOT MERELY SELECTED. feedLive is false once the last
-  // spoonful lands, because `mode` stays 'feed' until the operator
-  // moves on and the arms are parked at rest for all of it. Vitals is
-  // different on purpose: it keeps reading a heart rate for as long as
-  // it is up, so the whole time genuinely is care delivered.
-  const working = cycleLive || feedLive || mode === 'vitals';
+  // A live scrub cycle counts: arms are moving against a person. Voice never
+  // counts -- a machine listening to a question has not cared for anybody,
+  // and counting it would inflate the one number here that has to be honest.
+  // Shower with no cycle running is the resting state, so the cycle flag is
+  // what makes it real.
+  //
+  // VITALS USED TO COUNT FOR AS LONG AS THE PANEL WAS UP, on the argument
+  // that a heart rate is being read the whole time. No heart rate is being
+  // read: no pulse oximeter is wired, /api/vitals answers disconnected, and
+  // the panel now says NO SENSOR CONNECTED. Seconds of care accumulating
+  // under that is the clearest contradiction the screen could hold. It counts
+  // only when a reading actually arrives, which today is never.
+  //
+  // FEEDING COUNTS ONLY WHILE THE ARM IS ON A TRIP. feedLive stays true for
+  // the whole beat, including the long waits between asks when the arm is
+  // parked doing nothing, and that idle time is not care delivered. feedBusy
+  // is true exactly from the ask until the arm is home.
+  const reading = mode === 'vitals' && ecg && ecg.bpm > 0;
+  const working = cycleLive || (feedLive && feedBusy) || reading;
   if (!working) return;
   careSeconds += Math.min(dt || 0, 0.05);      // clamp a tab-switch spike
   const s = Math.floor(careSeconds);
@@ -999,7 +1007,13 @@ function stepSensor() {
   // that went out would be claiming the sensor failed -- the arms stop, the
   // monitoring does not, which is the whole point of monitoring.
   if (!sensorLed) return;
-  const live = (mode === 'vitals') && ecg;
+  // AND IT ONLY PULSES WHEN THERE IS A RATE TO PULSE AT. ecg.bpm is 0 while
+  // /api/vitals says disconnected, which is always so far -- no pulse
+  // oximeter is wired. Without the bpm check the phase sits at 0, which is
+  // the top of the R spike, so the light would sit steady at full brightness:
+  // a lamp claiming a heartbeat on a panel that just said NO SENSOR
+  // CONNECTED.
+  const live = (mode === 'vitals') && ecg && ecg.bpm > 0;
   // The R spike lands early in the cycle, so the flash is front-loaded: a
   // fast rise and a slower fall reads as a pulse rather than a blink.
   const ph = live ? ecg.phase : 0;
@@ -1102,11 +1116,19 @@ let modeTick = null;
 // stays 'feed' long after the last spoonful lands, so the mode name
 // alone cannot tell care being delivered from a mode left up.
 let feedLive = false;
+// True from the moment a trip is asked for until the arm is back. It is what
+// stops a second ask queueing behind the first: an arm already on its way to
+// somebody's face should ignore the key, not remember it and go twice.
+let feedBusy = false;
+// The current beat's "go once". Held here so the keypress handler can reach
+// it -- the mode's enter() closes over the readout, so the trip function has
+// to come out rather than the handler going in. Null whenever feed is closed.
+let feedTrip = null;
 const MODES = {
   shower: { label: 'CLEANLINESS', unit: '%',
             // the existing cycle; arms work the body
             enter: () => { fleetPhase('rest'); } },
-  feed:   { label: 'FEEDING',     unit: '%',
+  feed:   { label: 'MEAL RUN',    unit: '%',
             // ONE arm lifts to mouth height and holds. Four arms converging
             // on someone's face reads as an attack; one arm offering food
             // reads as care, which is the difference the pitch depends on.
@@ -1122,98 +1144,101 @@ const MODES = {
               // and coming back, which is the part that was ever real. The
               // count below measures those trips.
               const label = document.getElementById('label');
-              if (label) label.textContent = pillsRequested ? 'MEDICATION'
-                                          : drinkRequested ? 'DRINKING' : 'FEEDING';
-              // THE READOUT MUST MOVE. Feeding and medication left the
-              // counter frozen at 0% under their own label, which reads as a
-              // broken meter rather than as a beat that does not measure
-              // anything. Every other mode on this screen moves.
+              // THE LABEL NAMES THE ERRAND, NOT AN OUTCOME. It said FEEDING,
+              // DRINKING and MEDICATION, and each is a claim that something
+              // reached a person. Nothing does: there is no food, no cup and
+              // no pill anywhere in this program, and the arm travels to a
+              // point near a face and comes back. Saying MEDICATION over that
+              // is the strongest claim on the whole screen and the least
+              // supported one.
               //
-              // It counts SPOONFULS, not a percentage of nothing: a meal is
-              // eaten in mouthfuls and a dose is a number of pills, so the
-              // number is a real thing a carer would track.
+              // What is true is which errand the operator asked for, so the
+              // label says that and the readout below says where the arm is.
+              // Someone reading both learns exactly what the machine is doing
+              // and is not told that anybody was fed.
+              if (label) label.textContent = pillsRequested ? 'MEDS RUN'
+                                          : drinkRequested ? 'DRINK RUN' : 'MEAL RUN';
+              // NO COUNTER. This said "0 SPOONS GIVEN" and climbed as the
+              // arm completed trips to the person's face.
+              //
+              // The trips were real by then, so the number was not a lie
+              // exactly -- but a machine that has fed nobody yet should not
+              // print a quantity at all. "0 SPOONS GIVEN" is a claim that
+              // spoonfuls are a thing this machine counts, and it is not:
+              // nothing weighs the bowl, nothing watches the person swallow,
+              // and an arm arriving near a face is not a mouthful eaten. The
+              // count was measuring its own motion and labelling it food.
+              //
+              // So the readout says what the arm is DOING, which is the only
+              // thing here anybody actually knows. REACHING while it travels,
+              // AT THE MOUTH when it arrives, both driven by the same
+              // arrival test the count used to be driven by. An arm that does
+              // not move never says AT THE MOUTH, so the screen still cannot
+              // claim something that did not happen -- it just no longer
+              // dresses that up as a tally.
               borrowPct(true);
-              // NO TOTAL. This used to read `2 : 3 : 4` -- two pills, three
-              // sips, four spoonfuls -- and the bar filled towards it. Every
-              // one of those was typed. Nothing counts the pills in a real
-              // dispenser, nothing knows how much is in the glass, and an arm
-              // fed by a person's appetite has no number of spoonfuls in it.
-              // A bar at 50% claimed the machine knew it was halfway through
-              // a dose it had never been told the size of.
-              //
-              // So the readout reports what HAPPENED and stops: "3 SPOONS
-              // GIVEN". It only ever goes up, it is only ever a count of
-              // arrivals, and it never implies an end it cannot see. THREE
-              // THINGS THE TILE PROMISES -- eating, drinking, pills -- so the
-              // noun still changes with what was asked for.
-              // ONE OF THEM READS AS ENGLISH. "1 SIPS GIVEN" is what a
-              // counter with a typed total never had to deal with, because
-              // it only ever printed "1 / 3". A count with no total is read
-              // on its own, so it has to be a sentence.
-              const word = (n) => (pillsRequested ? (n === 1 ? 'PILL' : 'PILLS')
-                                 : drinkRequested ? (n === 1 ? 'SIP' : 'SIPS')
-                                 : (n === 1 ? 'SPOON' : 'SPOONS'));
-              let given = 0;
               const pct = document.getElementById('pct');
               const fill = document.getElementById('fill');
-              // CLAIM THE READOUT NOW, NOT IN 400ms. serve() is deferred until
-              // the arm has travelled to mouth height, and setMode has already
-              // painted the CLEANLINESS percentage into this element on its way
-              // in -- so for those 400ms the projector read "FEEDING" over
-              // "100%", which parses as "fed 100%". Writing the zero up front
-              // costs nothing and there is never a frame where the label and
-              // the number describe different things.
-              if (pct) pct.textContent = `0 ${word(0)} GIVEN`;
-              // AND THE BAR IS HIDDEN, not just emptied. A progress bar is a
-              // claim that there is progress towards something, and with the
-              // typed total gone there is nothing to be a fraction of. Left
-              // visible at 0% it reads as a meter that broke rather than as a
-              // beat that does not measure that way -- which is the same lie
-              // the invented total told, drawn instead of typed.
+              // THE BAR IS HIDDEN. A progress bar claims progress towards
+              // something and there is nothing here to be a fraction of.
+              // Left visible and empty it reads as a meter that broke.
               const bar = document.getElementById('bar') || (fill && fill.parentElement);
               if (bar) bar.style.visibility = 'hidden';
-              // THE BAR IS EMPTIED AND LEFT ALONE. It measures progress
-              // towards something, and there is nothing here to progress
-              // towards -- see the note on the missing total. The count
-              // carries this beat on its own.
               if (fill) fill.style.width = '0%';
+              // CLAIM THE READOUT NOW, NOT IN 1500ms. setMode has already
+              // painted the CLEANLINESS percentage into this element on its
+              // way in, so without this the projector reads the meal label
+              // over "100%" until the first travel starts, which parses as
+              // "fed 100%".
+              //
+              // AND IT SAYS WHAT IS TRUE AT THIS INSTANT, which is that the
+              // arm is parked and has been asked to go. It said REACHING
+              // here, 1500ms before anything moved.
+              const say = (t) => { if (pct && mode === 'feed') pct.textContent = t; };
+              say('WAITING');
               feedLive = true;
-              // ONE MOUTHFUL: carry out, let go at the mouth, come back
-              // empty. `served` is called by waitForMouth when that has
-              // actually finished, so the count and the sound both happen on
-              // the far side of the travel rather than when it was asked for.
-              const carry = () => {
-                if (mode !== 'feed') return;
+              // ONE TRIP PER REQUEST, AND THEN IT WAITS.
+              //
+              // This used to be a loop: arrived() called carry() called
+              // arrived(), forever, for as long as the mode was open. That is
+              // the hardcoded animation. Nothing asked for a second mouthful
+              // or a third -- the arm cycled because a mode was selected, and
+              // the old counter turned that self-driven motion into a tally
+              // of meals delivered.
+              //
+              // A real machine takes an instruction, carries it out, and
+              // stops until it gets another. So a trip happens when somebody
+              // asks: opening the beat is the first ask, the operator's key
+              // is every ask after it, and between asks the arm stands at the
+              // low end of its travel doing nothing. An idle arm on screen is
+              // the honest picture of a machine waiting for an instruction.
+              const trip = () => {
+                if (mode !== 'feed' || feedBusy) return;
+                feedBusy = true;
+                say('REACHING');
                 feedReach();
-                // COUNT AN ARRIVAL, NOT A TICK. This was
-                // setTimeout(serve, 1600): the number climbed on a clock and
-                // would have reached its total with the arm bolted still.
-                //
-                // waitForMouth watches the claw's real world position -- out
-                // to where feedPoseWorld(1) puts it, then home to the tray
-                // with nothing in it -- and only then counts. An arm that
-                // does not get there does not feed anybody, and the screen
-                // should say so by not counting.
-                waitForMouth(served);
+                // WATCH THE ARM, NOT A CLOCK. This was setTimeout(..., 1600):
+                // the screen advanced on a timer and would have shown a trip
+                // completed with the arm bolted still.
+                waitForMouth(arrived);
               };
-              const served = () => {
-                if (mode !== 'feed' || !pct) return;
-                given += 1;
-                pct.textContent = `${given} ${word(given)} GIVEN`;
-                // ONE SOUND PER MOUTHFUL. The demo script tells the presenter
-                // to stop talking and let the sound carry the beat, and
-                // feeding was silent -- three of the five beats on this
-                // screen made no noise at all, so the advice only worked for
-                // the scrub. A soft tick per spoonful gives the count a
-                // rhythm an audience can follow without watching the number.
+              const arrived = () => {
+                feedBusy = false;
+                if (mode !== 'feed') return;
+                // "WAITING", NOT "AT THE MOUTH". By the time this runs the
+                // arm is home at the low end of its travel, not at the face:
+                // the trip is the whole round trip, and this is its end. The
+                // first wording described the halfway point while the picture
+                // showed the arm parked, which is the small version of the
+                // same disagreement the counter was.
+                say('TRIP DONE · WAITING');
+                // ONE SOUND PER TRIP. The demo script tells the presenter to
+                // stop talking and let the sound carry the beat, and feeding
+                // was silent -- three of the five beats on this screen made no
+                // noise at all, so the advice only worked for the scrub.
                 play('click');
-                // AND AGAIN, until somebody stops it. There is no count to
-                // reach, so the beat ends the way a real meal does: the
-                // person is done, and the operator changes the mode. leave()
-                // is what stops the arm, drops the prop and clears feedLive.
-                carry();
               };
-              const serve = carry;
+              feedTrip = trip;
 
               // THE ARM GOES TO THE TRAY FIRST, and the prop is put where its
               // claw lands. Nothing is served until that travel has happened,
@@ -1225,7 +1250,7 @@ const MODES = {
                 // what focus() exists for: the audience can see which part of
                 // the body that arm is responsible for while it feeds.
                 if (territories && territoriesOn) territories.focus(1);
-                serve();
+                trip();
                 // 1500, NOT 400. That was the gap before the arm had anywhere
                 // to travel to; now it has to reach the tray before the first
                 // mouthful, and the spring takes about that long to close on a
@@ -1240,6 +1265,8 @@ const MODES = {
               // still attached, and the scrub's own sponge swap would then be
               // fighting a passenger.
               feedEnd();
+              feedTrip = null;
+              feedBusy = false;
               // Switching away MID-BEAT must stop the care count too, or the
               // flag stays true for the rest of the demo and every later
               // second counts as feeding. serve() only clears it when the
@@ -1283,32 +1310,59 @@ const MODES = {
               if (host) host.classList.add('on');
               ecg?.start();
               const pct = document.getElementById('pct');
-              const beat = () => {
+              // NO INVENTED READINGS. This used to print
+              //   const bpm = 72 + Math.round(Math.sin(Date.now()/2600)*5)
+              // and an SpO2 from a second sine, and drive the ECG trace from
+              // the first one. Three sensor readings, none of them measured,
+              // on the one panel of this demo whose whole subject is a
+              // sensor. No pulse oximeter is wired -- the hardware list has
+              // the MAX30102 as REQUESTED, not held -- and our own
+              // /api/vitals has always answered
+              //   {"status":"disconnected","readings":null}
+              // with the comment "do not put a number here until a sensor
+              // exists to have measured it". The 3D page simply never asked
+              // it, and drew a healthy adult instead.
+              //
+              // Now it asks, and renders whatever comes back. With no sensor
+              // that is NO SENSOR CONNECTED and a flat trace: the panel shows
+              // the machine knowing it cannot read a heart, which is the true
+              // state and the only one it can honestly show. When a sensor
+              // lands, the same code paints its numbers with nothing here to
+              // change -- which was the stated point of building the panel
+              // before the hardware.
+              const lab = document.getElementById('label');
+              const beat = async () => {
                 if (mode !== 'vitals' || !pct) return;
-                // A resting adult, wandering a little so it never looks frozen.
-                const bpm = 72 + Math.round(Math.sin(Date.now() / 2600) * 5);
-                pct.textContent = `${bpm} BPM`;
-                // SPO2 COMES FROM THE SAME SENSOR, and the mode strip has
-                // promised it since the strip was built. A MAX30102 measures
-                // pulse oximetry and heart rate from one part, so showing
-                // both is the honest reading rather than a second claim.
-                //
-                // On the LABEL line, not in the big readout: #pct is 97px on
-                // a projector and already carries the BPM. A second number
-                // there competes with the headline instead of supporting it.
-                //
-                // Healthy resting range, drifting on its own slower cycle so
-                // it never looks pinned to the pulse.
-                const spo2 = 97 + Math.round(Math.sin(Date.now() / 7100) * 1.4);
-                const lab = document.getElementById('label');
-                if (lab) lab.textContent = `HEART RATE  ·  SPO2 ${spo2}%`;
-                // The trace and the number come from the SAME value, so they
-                // can never disagree on screen.
-                ecg?.setBpm(bpm);
-                // A tick on the beat. A monitor that shows a pulse and makes
-                // no sound reads as a screensaver; the sound is most of what
-                // makes it read as a live reading.
-                play('click');
+                let readings = null;
+                try {
+                  const r = await fetch('http://127.0.0.1:8770/api/vitals', { cache: 'no-store' });
+                  const j = await r.json();
+                  if (j && j.status === 'connected') readings = j.readings;
+                } catch (_) {
+                  // A CARE API THAT IS DOWN IS NOT A HEART THAT STOPPED, and
+                  // neither is a sensor that is absent. Both land here as no
+                  // readings, which is the same thing to say on screen.
+                }
+                if (readings && typeof readings.bpm === 'number') {
+                  pct.textContent = `${Math.round(readings.bpm)} BPM`;
+                  if (lab) {
+                    lab.textContent = typeof readings.spo2 === 'number'
+                      ? `HEART RATE  ·  SPO2 ${Math.round(readings.spo2)}%`
+                      : 'HEART RATE';
+                  }
+                  // The trace and the number come from the SAME value, so
+                  // they can never disagree on screen.
+                  ecg?.setBpm(readings.bpm);
+                  play('click');
+                } else {
+                  pct.textContent = 'NO SENSOR CONNECTED';
+                  if (lab) lab.textContent = 'HEART RATE';
+                  // A FLAT TRACE, AND NO TICK. A monitor drawing a pulse and
+                  // clicking on the beat is the picture of a live reading; on
+                  // a panel that has no reading it is the same false claim
+                  // the number was, drawn and played instead of printed.
+                  ecg?.setBpm(0);
+                }
                 // ONE ID, NOT A GROWING LIST. This re-arms itself, so only
                 // the latest timer can be pending -- pushing each one made
                 // modeTimers grow for as long as the mode was held.
@@ -1992,6 +2046,10 @@ function feedEnd() {
   // this is true, so leaving it set after a stop keeps a stopped machine
   // clocking up care delivered.
   feedLive = false;
+  // AND NO TRIP IS IN FLIGHT. feedBusy gates the ask, so a stop that left it
+  // true would latch the arm: the key would be ignored for the rest of the
+  // demo and the operator would have no way to start it again.
+  feedBusy = false;
 }
 
 /** SEND THE ARM DOWN TO THE TRAY END OF ITS TRAVEL. Called once when feed
@@ -4092,8 +4150,18 @@ addEventListener('keydown', async (e) => {
   // shuffle is still happening and leave the screen just as still as before.
   if (e.key === 'g' || e.key === 'G') { setShot('handoff', 6.0); play('click'); return; }
   if (e.key === '7') { setMode('shower'); return; }
-  if (e.key === '8') { pillsRequested = drinkRequested = false;
-                       setMode('feed'); return; }
+  // '8' OPENS THE BEAT, AND ASKS FOR A TRIP ONCE IT IS OPEN.
+  //
+  // The arm used to cycle to the face and back forever on its own, which is
+  // what made the old spoon count meaningless: nothing had requested any of
+  // those trips. Now one ask is one trip, and this is the ask -- press it
+  // again for another. An arm that is already on its way ignores the key
+  // rather than queueing a second trip behind the first.
+  if (e.key === '8') {
+    if (mode === 'feed') { feedTrip?.(); return; }
+    pillsRequested = drinkRequested = false;
+    setMode('feed'); return;
+  }
   // SHIFT+8 is the pill beat. The operator must be able to show it without
   // the microphone, because the voice is the one part of this demo that can
   // be defeated by a noisy room.

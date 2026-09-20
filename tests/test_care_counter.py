@@ -100,13 +100,18 @@ async def main():
         await pg.keyboard.press("9")
         await pg.wait_for_timeout(4000)
         vit = secs(await read())
-        # Not the same rule as feeding, on purpose: a heart rate is being read
-        # the entire time the mode is up.
-        check("reading vitals is care delivered",
-              vit is not None and vit > idle, f"{idle}s then {vit}s")
+        # INVERTED ON 2026-09-20, and the inversion is the point. This used to
+        # assert that vitals counts for as long as the panel is up, on the
+        # argument that a heart rate is being read the whole time. No heart
+        # rate is being read: no pulse oximeter is wired, /api/vitals answers
+        # disconnected, and the panel says NO SENSOR CONNECTED. Seconds of
+        # care accumulating under those words was the clearest contradiction
+        # on the screen.
+        check("a panel with no sensor counts no care",
+              vit == idle, f"{idle}s then {vit}s under NO SENSOR CONNECTED")
 
         print("\n=== 3. A RESET CLEARS IT LIKE EVERY OTHER READOUT ===")
-        await pg.keyboard.press("7")        # leave vitals, or it repaints
+        await pg.keyboard.press("7")        # leave feed, or it repaints
         await pg.wait_for_timeout(400)
         await pg.keyboard.press("r")
         await pg.wait_for_timeout(900)
@@ -115,8 +120,11 @@ async def main():
               repr(after[:40]))
         # And the count itself must be zero, not merely hidden -- a hidden
         # panel that reopens at 40s is the same lie with an extra step.
-        await pg.keyboard.press("9")
-        await pg.wait_for_timeout(2500)
+        # THE FEED BEAT EARNS THE SECONDS NOW, not vitals -- see section 2.
+        # A trip takes about twelve seconds and only counts while it is in
+        # flight, so this waits for one to be well under way.
+        await pg.keyboard.press("8")
+        await pg.wait_for_timeout(6000)
         restarted = secs(await read())
         check("and the count itself restarted, not just the panel",
               restarted is not None and restarted < vit,
@@ -128,12 +136,12 @@ async def main():
         # body swap would claim care delivered to someone who just arrived --
         # the same lie as carrying them across `r`, in a place that is easier
         # to miss because the whole screen changes at once.
-        await pg.keyboard.press("9")            # earn some seconds first
-        await pg.wait_for_timeout(3000)
+        await pg.keyboard.press("8")            # earn some seconds first
+        await pg.wait_for_timeout(6000)         # mid-trip, while it counts
         earned = secs(await read())
         check("seconds were on the panel before the swap",
               earned is not None and earned > 0, earned)
-        await pg.keyboard.press("7")            # leave vitals, or it repaints
+        await pg.keyboard.press("7")            # leave feed, or it repaints
         await pg.wait_for_timeout(400)
         # WAIT FOR THE RELOAD, DO NOT GUESS AT IT. `n` reloads the page, and a
         # fixed 3s wait passed alone and failed inside the suite, where the
@@ -155,8 +163,8 @@ async def main():
         # The swap above left the panel empty, so earn a second back before
         # reading the rows -- otherwise this checks an empty string and would
         # pass with the two zeros deleted from the markup entirely.
-        await pg.keyboard.press("9")
-        await pg.wait_for_timeout(2000)
+        await pg.keyboard.press("8")
+        await pg.wait_for_timeout(6000)     # mid-trip, while the clock runs
         rows = await read()
         check("it still says nobody lifted and nobody was hurt",
               "0 LIFTS BY A PERSON" in rows and "0 BACKS AT RISK" in rows,
